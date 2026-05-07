@@ -41,3 +41,16 @@ body {
 audio {
   filter: invert(0.9) hue-rotate(180deg) brightness(1.5) contrast(1.2);
 }
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

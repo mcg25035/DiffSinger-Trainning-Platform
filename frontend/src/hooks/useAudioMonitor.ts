@@ -11,6 +11,9 @@ export interface Recording {
     url: string;
     type: 'raw' | 'segment';
     lyrics?: string;
+    isPending?: boolean;
+    hasAlignment?: boolean;
+    activeJobId?: string;
 }
 
 export function useAudioMonitor() {
@@ -36,7 +39,7 @@ export function useAudioMonitor() {
 
     const fetchRecordings = useCallback(async () => {
         try {
-            const response = await fetch('/api/recordings');
+            const response = await fetch(`/api/recordings?t=${Date.now()}`);
             if (response.ok) {
                 const data = await response.json();
                 
@@ -46,11 +49,14 @@ export function useAudioMonitor() {
                     type: 'raw'
                 }));
                 
-                const segments: Recording[] = data.segments.map((f: { filename: string, lyrics: string }) => ({
+                const segments: Recording[] = data.segments.map((f: { filename: string, lyrics: string, isPending: boolean, hasAlignment: boolean, activeJobId?: string }) => ({
                     filename: f.filename,
                     url: `/upload_segments/${f.filename}`,
                     type: 'segment',
-                    lyrics: f.lyrics
+                    lyrics: f.lyrics,
+                    isPending: f.isPending,
+                    hasAlignment: f.hasAlignment,
+                    activeJobId: f.activeJobId
                 }));
 
                 segments.sort((a, b) => parseInt(b.filename, 10) - parseInt(a.filename, 10));

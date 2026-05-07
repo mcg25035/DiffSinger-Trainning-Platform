@@ -2,6 +2,7 @@ export interface Dictionary {
   id: string;
   name: string;
   phonemes: string[];
+  mfa_model?: string;
 }
 
 export function validateLyrics(lyrics: string, validPhonemes: Set<string>): { isValid: boolean; invalidWords: string[] } {

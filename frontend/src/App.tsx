@@ -5,7 +5,9 @@ import { VolumeMeter } from './components/VolumeMeter';
 import { RecordingList } from './components/RecordingList';
 import { WaveformVisualizer } from './components/WaveformVisualizer';
 import { AudioSplitter } from './components/AudioSplitter';
+import { LabelEditor } from './components/LabelEditor';
 import { LyricsManager } from './components/LyricsManager';
+import { MappingManager } from './components/MappingManager';
 import { useState, memo, useCallback, useEffect } from 'react';
 import type { Dictionary } from './utils/dictionary';
 import './index.css';
@@ -32,15 +34,17 @@ const Header = memo(({ status }: { status: { text: string, color: string } }) =>
   </div>
 ));
 
-const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onRefresh }: { 
+const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefresh }: { 
   rawRecordings: Recording[], 
   uploadSegments: Recording[], 
   onSplit: (rec: Recording) => void,
+  onLabel: (rec: Recording) => void,
   onRefresh: () => void
 }) => {
   const [dictionaries, setDictionaries] = useState<Dictionary[]>([]);
   const [selectedDictId, setSelectedDictId] = useState<string>('');
   const [showLyricsManager, setShowLyricsManager] = useState(false);
+  const [showMappingManager, setShowMappingManager] = useState(false);
 
   useEffect(() => {
     fetch('/api/dictionaries')
@@ -72,6 +76,12 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onRefresh }: {
           onClose={() => setShowLyricsManager(false)} 
         />
       )}
+      
+      {showMappingManager && (
+        <MappingManager 
+          onClose={() => setShowMappingManager(false)} 
+        />
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
@@ -86,16 +96,30 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onRefresh }: {
             ))}
           </select>
         </div>
-        <button 
-          onClick={() => setShowLyricsManager(true)}
-          style={{ alignSelf: 'end', background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-          title="Dictionary Manager"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-          </svg>
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignSelf: 'end' }}>
+          <button 
+            onClick={() => setShowMappingManager(true)}
+            style={{ background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#2979ff', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            title="MFA Mapping Manager"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+              <line x1="6" y1="6" x2="6.01" y2="6"></line>
+              <line x1="6" y1="18" x2="6.01" y2="18"></line>
+            </svg>
+          </button>
+          <button 
+            onClick={() => setShowLyricsManager(true)}
+            style={{ background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+            title="Dictionary Manager"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -103,7 +127,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onRefresh }: {
            Raw Recordings ({rawRecordings.length})
          </h2>
          <div style={{ flex: 1, overflowY: 'auto' }}>
-           <RecordingList recordings={rawRecordings} onSplit={onSplit} onRefresh={onRefresh} />
+           <RecordingList recordings={rawRecordings} onSplit={onSplit} onLabel={onLabel} onRefresh={onRefresh} />
          </div>
       </div>
       <div style={{ height: '1px', background: '#333' }} />
@@ -112,7 +136,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onRefresh }: {
            Upload Segments ({uploadSegments.length})
          </h2>
          <div style={{ flex: 1, overflowY: 'auto' }}>
-           <RecordingList recordings={uploadSegments} onRefresh={onRefresh} phonemeSet={phonemeSet} />
+           <RecordingList recordings={uploadSegments} onLabel={onLabel} onRefresh={onRefresh} phonemeSet={phonemeSet} dictionaryId={selectedDictId} />
          </div>
       </div>
     </div>
@@ -136,6 +160,7 @@ function App() {
   } = useAudioMonitor();
 
   const [selectedForSplit, setSelectedForSplit] = useState<Recording | null>(null);
+  const [selectedForLabeling, setSelectedForLabeling] = useState<Recording | null>(null);
 
   const handleAdopt = useCallback(() => {
     setSelectedForSplit(null);
@@ -144,10 +169,25 @@ function App() {
 
   const handleSetSplit = useCallback((rec: Recording) => {
     setSelectedForSplit(rec);
+    setSelectedForLabeling(null);
   }, []);
+
+  const handleSetLabeling = useCallback((rec: Recording) => {
+    setSelectedForLabeling(rec);
+    setSelectedForSplit(null);
+  }, []);
+
+  const handleSaveLabeling = useCallback(() => {
+    setSelectedForLabeling(null);
+    refreshRecordings();
+  }, [refreshRecordings]);
 
   const handleCancelSplit = useCallback(() => {
     setSelectedForSplit(null);
+  }, []);
+
+  const handleCancelLabeling = useCallback(() => {
+    setSelectedForLabeling(null);
   }, []);
 
   return (
@@ -189,7 +229,17 @@ function App() {
             )}
           </div>
 
-          <div style={{ display: selectedForSplit ? 'none' : 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
+          <div style={{ display: selectedForLabeling ? 'block' : 'none', width: '100%', height: '100%' }}>
+            {selectedForLabeling && (
+              <LabelEditor 
+                recording={selectedForLabeling} 
+                onSave={handleSaveLabeling} 
+                onCancel={handleCancelLabeling} 
+              />
+            )}
+          </div>
+
+          <div style={{ display: (selectedForSplit || selectedForLabeling) ? 'none' : 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', justifyContent: 'center' }}>
               <RecorderControls 
                 isRecording={isRecording}
@@ -239,6 +289,7 @@ function App() {
           rawRecordings={rawRecordings} 
           uploadSegments={uploadSegments} 
           onSplit={handleSetSplit} 
+          onLabel={handleSetLabeling}
           onRefresh={refreshRecordings}
         />
 

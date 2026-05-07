@@ -8,6 +8,12 @@ interface Props {
 export function LyricsManager({ onClose }: Props) {
   const [dictionaries, setDictionaries] = useState<Dictionary[]>([]);
   
+  // MFA Model State
+  const [models, setModels] = useState<{ local: string[], remote: string[] }>({ local: [], remote: [] });
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [validPhones, setValidPhones] = useState<string[]>([]);
+  const [isLoadingPhones, setIsLoadingPhones] = useState(false);
+
   // Dictionary Management State
   const [newDictName, setNewDictName] = useState('');
   const [newDictId, setNewDictId] = useState('');
@@ -15,14 +21,34 @@ export function LyricsManager({ onClose }: Props) {
   const [isEditing, setIsEditing] = useState(false);
 
   const fetchDicts = async () => {
-    const res = await fetch('/api/dictionaries');
-    const data = await res.json();
-    setDictionaries(data);
+    const [dRes, modelRes] = await Promise.all([
+      fetch('/api/dictionaries'),
+      fetch('/api/mfa/models')
+    ]);
+    const dData = await dRes.json();
+    const modelData = await modelRes.json();
+    setDictionaries(dData);
+    setModels(modelData);
+    
+    if (modelData.local.length > 0 && !selectedModel) setSelectedModel(modelData.local[0]);
   };
 
   useEffect(() => {
     fetchDicts();
   }, []);
+
+  useEffect(() => {
+    if (selectedModel) {
+      setIsLoadingPhones(true);
+      fetch(`/api/mfa/phones/${selectedModel}`)
+        .then(res => res.json())
+        .then(data => {
+          setValidPhones(data.phones || []);
+          setIsLoadingPhones(false);
+        })
+        .catch(() => setIsLoadingPhones(false));
+    }
+  }, [selectedModel]);
 
   const handleSaveDict = async () => {
     if (!newDictId || !newDictName) return alert("ID and Name required");
@@ -31,7 +57,12 @@ export function LyricsManager({ onClose }: Props) {
     const res = await fetch('/api/dictionaries', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: newDictId, name: newDictName, phonemes })
+      body: JSON.stringify({ 
+        id: newDictId, 
+        name: newDictName, 
+        phonemes,
+        mfa_model: selectedModel // Store the associated model
+      })
     });
     if (res.ok) {
       fetchDicts();
@@ -101,6 +132,37 @@ export function LyricsManager({ onClose }: Props) {
             <h3 style={{ margin: '0 0 24px 0', fontSize: '18px', color: '#00e676' }}>{isEditing ? 'Edit Dictionary' : 'Create New Dictionary'}</h3>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <label style={{ fontSize: '11px', color: '#888', fontWeight: 'bold' }}>ASSOCIATED MFA MODEL</label>
+                <select 
+                  value={selectedModel} 
+                  onChange={e => setSelectedModel(e.target.value)}
+                  style={{ background: '#000', border: '1px solid #333', borderRadius: '10px', color: '#fff', padding: '12px', fontSize: '14px' }}
+                >
+                  <optgroup label="Local (Downloaded)">
+                    {models.local.map(m => <option key={m} value={m}>{m}</option>)}
+                  </optgroup>
+                  <optgroup label="Remote (MFA Repo)">
+                    {models.remote.map(m => <option key={m} value={m}>{m}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+
+              {selectedModel && (
+                <div style={{ padding: '12px', background: '#000', borderRadius: '10px', border: '1px solid #222' }}>
+                  <label style={{ fontSize: '10px', color: '#555', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
+                    VALID PHONE SET REFERENCE FOR {selectedModel.toUpperCase()} {isLoadingPhones && '(Loading...)'}
+                  </label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '100px', overflowY: 'auto', fontSize: '12px' }}>
+                    {validPhones.map(p => (
+                      <span key={p} style={{ background: '#1a1a1a', padding: '2px 6px', borderRadius: '4px', color: '#888' }}>{p}</span>
+                    ))}
+                    {validPhones.length === 0 && !isLoadingPhones && <span style={{ color: '#444' }}>No phones found.</span>}
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <label style={{ fontSize: '11px', color: '#888', fontWeight: 'bold' }}>UNIQUE ID</label>
