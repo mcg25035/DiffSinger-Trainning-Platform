@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/plugins/regions';
+import Spectrogram from 'wavesurfer.js/plugins/spectrogram';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 import type { Recording } from '../hooks/useAudioMonitor';
 
 interface Props {
   recording: Recording;
-  onSave: () => void;
   onCancel: () => void;
 }
 
@@ -23,7 +23,7 @@ interface WordInstance {
   phonemes: string[];
 }
 
-export function LabelEditor({ recording, onSave, onCancel }: Props) {
+export function LabelEditor({ recording, onCancel }: Props) {
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -32,13 +32,14 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [labelsCount, setLabelsCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [lyrics, setLyrics] = useState(recording.lyrics || '');
+  const [lyrics] = useState(recording.lyrics || '');
   const [wordInstances, setWordInstances] = useState<WordInstance[]>([]);
   const [, setUndoStack] = useState<string[]>([]);
   const [isDirty, setIsDirty] = useState(false);
@@ -118,6 +119,7 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
         return [...prev, current];
     });
     setIsDirty(true);
+    setSaveStatus('idle');
   };
 
   const handleUndo = () => {
@@ -137,7 +139,7 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
                     start: seg.start,
                     end: seg.end,
                     content: createLabelElement(seg.label, level),
-                    color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.3)' : 'rgba(0, 229, 255, 0.1)'),
+                    color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
                     drag: false,
                     resize: true,
                 });
@@ -145,6 +147,8 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
             setLabelsCount(segments.length);
             isUpdatingRef.current = false;
         }
+        setIsDirty(true);
+        setSaveStatus('idle');
         return newStack;
     });
   };
@@ -228,7 +232,7 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
             start: seg.start,
             end: seg.end,
             content: createLabelElement(seg.label, level),
-            color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.3)' : 'rgba(0, 229, 255, 0.1)'),
+            color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
             drag: false, // 關閉整塊拖動，讓滑鼠可以穿透去拖動時間軸
             resize: true,
           });
@@ -252,21 +256,33 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
     const ws = WaveSurfer.create({
       container: containerRef.current,
       waveColor: '#00e5ff',
-      progressColor: 'rgba(0, 229, 255, 0.3)',
+      progressColor: 'rgba(0, 229, 255, 0.15)',
       cursorColor: '#fff',
       barWidth: 2,
-      height: 200,
+      height: 120,
       normalize: true,
       minPxPerSec: zoomLevel,
       backend: 'WebAudio',
     });
     const regions = ws.registerPlugin(RegionsPlugin.create());
+    ws.registerPlugin(
+      Spectrogram.create({
+        labels: true,
+        height: 280,
+        splitChannels: false,
+        colorMap: 'igray',
+        labelsColor: '#fff',
+        labelsHzColor: '#fff',
+      })
+    );
     (regions as any).avoidOverlapping = () => {};
     wavesurferRef.current = ws;
     regionsRef.current = regions;
     ws.once('ready', () => {
       setIsLoaded(true);
-      loadLabels(regions);
+      loadLabels(regions).then(() => {
+        runAlignment(recording.lyrics || '');
+      });
     });
     ws.on('play', () => setIsPlaying(true));
     ws.on('pause', () => setIsPlaying(false));
@@ -281,10 +297,33 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
       saveHistory();
       runAlignment(lyrics);
     });
-    regions.on('region-clicked', (r: Region) => {
-      setSelectedRegion(r);
-      setEditLabel(r.content?.getAttribute('data-label-text') || '');
+    regions.on('region-clicked', (_r: Region, _e: MouseEvent) => {
+      // Left click only navigates, does not show UI
     });
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      const ws = wavesurferRef.current;
+      const regions = regionsRef.current;
+      if (!ws || !regions) return;
+
+      // Get relative time from mouse position
+      const rect = containerRef.current!.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const scrollLeft = ws.getWrapper().scrollLeft;
+      const totalWidth = ws.getWrapper().scrollWidth;
+      const time = ((x + scrollLeft) / totalWidth) * ws.getDuration();
+
+      const all = regions.getRegions().sort((a, b) => a.start - b.start);
+      const target = all.find(reg => time >= reg.start && time <= reg.end);
+      if (target) {
+        setSelectedRegion(target);
+        setEditLabel(target.content?.getAttribute('data-label-text') || '');
+      }
+    };
+
+    containerRef.current?.addEventListener('contextmenu', handleContextMenu);
+
     // ws.on('interaction', () => { setSelectedRegion(null); }); // 移除此行，讓編輯框不要因為點擊時間軸而關閉
     ws.on('dblclick', () => {
         const time = ws.getCurrentTime();
@@ -299,7 +338,7 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
                 start: time,
                 end: oldEnd,
                 content: createLabelElement(oldLabel, 0),
-                color: 'rgba(0, 229, 255, 0.2)',
+                color: 'rgba(0, 229, 255, 0.1)',
                 drag: false,
                 resize: true,
             });
@@ -310,7 +349,7 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
                 const label = r.content?.getAttribute('data-label-text') || '';
                 const isWarning = label === '!';
                 r.setOptions({ 
-                    color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.3)' : 'rgba(0, 229, 255, 0.1)'),
+                    color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
                     content: createLabelElement(label, level),
                     drag: false
                 });
@@ -340,10 +379,26 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
             e.preventDefault();
             handleUndo();
         }
+        if (e.code === 'Space') {
+            const active = document.activeElement;
+            const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+            if (!isInput) {
+                e.preventDefault();
+                handleWordPlay();
+            }
+        }
+        if (e.key === 'Delete') {
+            const active = document.activeElement;
+            const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+            if (!isInput) {
+                e.preventDefault();
+                handleDeleteRegion();
+            }
+        }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [wordInstances, labelsCount]);
 
   useEffect(() => {
     if (wavesurferRef.current && isLoaded) {
@@ -367,9 +422,17 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
       setLyricsCount(labelsCount || 0);
   }, [labelsCount]);
 
+  useEffect(() => {
+    if (saveStatus === 'saved') {
+        const timer = setTimeout(() => setSaveStatus('idle'), 10000);
+        return () => clearTimeout(timer);
+    }
+  }, [saveStatus]);
+
   const handleSave = async () => {
     if (!regionsRef.current) return;
     setIsSaving(true);
+    setSaveStatus('saving');
     const labContent = stringifyLab(regionsRef.current.getRegions());
     try {
       const res = await fetch(`/api/lab/${recording.filename}`, {
@@ -379,12 +442,16 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
       });
       if (res.ok) {
           setIsDirty(false);
-          onSave();
+          setSaveStatus('saved');
       }
-      else alert("Save failed");
+      else {
+          alert("Save failed");
+          setSaveStatus('error');
+      }
     } catch (err) {
       console.error(err);
       alert("Save error");
+      setSaveStatus('error');
     } finally {
       setIsSaving(false);
     }
@@ -409,7 +476,7 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
       
       selectedRegion.setOptions({ 
           content: createLabelElement(editLabel, level),
-          color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.3)' : 'rgba(0, 229, 255, 0.1)')
+          color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)')
       });
       setSelectedRegion(null);
       saveHistory();
@@ -419,17 +486,6 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
 
   const handleDeleteRegion = () => {
     if (selectedRegion && regionsRef.current) {
-        const all = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
-        const idx = all.indexOf(selectedRegion);
-        if (idx > 0) {
-            // 將前一個區塊的結束時間延伸到當前區塊的結束
-            const prev = all[idx - 1];
-            prev.setOptions({ end: selectedRegion.end });
-        } else if (idx === 0 && all.length > 1) {
-            // 如果是第一個，則讓後一個區塊的開始時間提前到 0
-            const next = all[1];
-            next.setOptions({ start: selectedRegion.start });
-        }
         selectedRegion.remove();
         setSelectedRegion(null);
         
@@ -440,7 +496,7 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
             const label = r.content?.getAttribute('data-label-text') || '';
             const isWarning = label === '!';
             r.setOptions({ 
-                color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.3)' : 'rgba(0, 229, 255, 0.1)'),
+                color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
                 content: createLabelElement(label, level)
             });
         });
@@ -505,10 +561,28 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-            <h2 style={{ fontSize: '20px', margin: 0, fontWeight: '800', color: '#fff' }}>VISUAL LABELER</h2>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', height: '100%', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <h2 style={{ fontSize: '20px', margin: 0, fontWeight: '800', color: '#fff' }}>VISUAL LABELER</h2>
+                <div style={{ display: 'flex', alignItems: 'center', color: saveStatus === 'saved' ? '#00e676' : saveStatus === 'saving' ? '#ffea00' : '#888', transition: 'all 0.3s' }}>
+                    {saveStatus === 'saving' ? (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="spin">
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                        </svg>
+                    ) : saveStatus === 'saved' ? (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17.5 19c2.5 0 4.5-2 4.5-4.5 0-2.3-1.7-4.2-4-4.5C17.4 7.1 14.9 5 12 5c-2.4 0-4.5 1.4-5.5 3.5C4.2 9.1 2 11.3 2 14c0 2.8 2.2 5 5 5h10.5z" />
+                            <polyline points="9 13 11 15 15 11" />
+                        </svg>
+                    ) : (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17.5 19c2.5 0 4.5-2 4.5-4.5 0-2.3-1.7-4.2-4-4.5C17.4 7.1 14.9 5 12 5c-2.4 0-4.5 1.4-5.5 3.5C4.2 9.1 2 11.3 2 14c0 2.8 2.2 5 5 5h10.5z" />
+                        </svg>
+                    )}
+                </div>
+            </div>
             <div style={{ display: 'flex', gap: '8px' }}>
                 <button 
                   onClick={handleWordPlay} 
@@ -555,44 +629,35 @@ export function LabelEditor({ recording, onSave, onCancel }: Props) {
         </div>
       </div>
 
-      <div style={{ background: '#111', padding: '20px', borderRadius: '16px', border: '1px solid #333', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                <label style={{ fontSize: '11px', fontWeight: '800', color: '#888' }}>LYRICS / MAPPING</label>
-                <textarea 
-                    value={lyrics} 
-                    onChange={e => setLyrics(e.target.value)} 
-                    placeholder="Paste lyrics here..."
-                    style={{ background: '#000', border: '1px solid #444', color: '#00e676', borderRadius: '8px', padding: '8px', fontSize: '12px', height: '40px', resize: 'none', outline: 'none' }}
-                />
-            </div>
-            <button 
-                onClick={() => runAlignment(lyrics)}
-                style={{ marginTop: '24px', background: '#333', border: '1px solid #555', color: '#fff', padding: '8px 16px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
-            >
-                RE-ALIGN
-            </button>
-        </div>
-      </div>
 
-      <div style={{ background: '#000', borderRadius: '12px', border: '1px solid #444', padding: '20px', position: 'relative', overflowX: 'auto' }}>
-        <div id="label-editor-waveform" ref={containerRef} style={{ minWidth: '100%' }} />
-        {selectedRegion && (
-            <div style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', background: '#222', padding: '12px', borderRadius: '12px', border: '1px solid #555', display: 'flex', gap: '8px', zIndex: 100, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
-                <input value={editLabel} onChange={e => setEditLabel(e.target.value)} onKeyDown={e => { if(e.key === 'Enter') handleUpdateLabel(); if(e.key === 'Escape') setSelectedRegion(null); }} autoFocus style={{ background: '#000', border: '1px solid #444', color: '#fff', padding: '6px 10px', borderRadius: '6px', outline: 'none', width: '80px', fontWeight: 'bold' }} />
-                <button onClick={handleUpdateLabel} style={{ background: '#00e5ff', border: 'none', color: '#000', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>OK</button>
-                <button onClick={() => precisePlayRange(selectedRegion.start, selectedRegion.end)} style={{ background: '#ffea00', border: 'none', color: '#000', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>PLAY</button>
-                <button onClick={handleDeleteRegion} style={{ background: '#ff4444', border: 'none', color: '#fff', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>DEL</button>
-                <div style={{ width: '1px', background: '#444', margin: '0 4px' }} />
-                <button onClick={() => setSelectedRegion(null)} style={{ background: '#444', border: 'none', color: '#fff', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>X</button>
-            </div>
-        )}
+
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ background: '#000', borderRadius: '12px', border: '1px solid #444', padding: '20px', position: 'relative', overflowX: 'auto', flex: 1 }}>
+            <div id="label-editor-waveform" ref={containerRef} style={{ minWidth: '100%' }} />
+            {selectedRegion && (
+                <div style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', background: '#222', padding: '12px', borderRadius: '12px', border: '1px solid #555', display: 'flex', gap: '8px', zIndex: 100, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
+                    <input value={editLabel} onChange={e => setEditLabel(e.target.value)} onKeyDown={e => { if(e.key === 'Enter') handleUpdateLabel(); if(e.key === 'Escape') setSelectedRegion(null); }} autoFocus style={{ background: '#000', border: '1px solid #444', color: '#fff', padding: '6px 10px', borderRadius: '6px', outline: 'none', width: '80px', fontWeight: 'bold' }} />
+                    <button onClick={handleUpdateLabel} style={{ background: '#00e5ff', border: 'none', color: '#000', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>OK</button>
+                    <button onClick={() => precisePlayRange(selectedRegion.start, selectedRegion.end)} style={{ background: '#ffea00', border: 'none', color: '#000', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>PLAY</button>
+                    <button onClick={handleDeleteRegion} style={{ background: '#ff4444', border: 'none', color: '#fff', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>DEL</button>
+                    <div style={{ width: '1px', background: '#444', margin: '0 4px' }} />
+                    <button onClick={() => setSelectedRegion(null)} style={{ background: '#444', border: 'none', color: '#fff', padding: '6px 10px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>X</button>
+                </div>
+            )}
+        </div>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
         #label-editor-waveform ::part(region) {
           border-right: 1px solid rgba(255,255,255,0.4) !important;
           border-left: 1px solid rgba(255,255,255,0.4) !important;
+        }
+        .spin {
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
       `}} />
     </div>

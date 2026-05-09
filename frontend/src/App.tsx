@@ -177,18 +177,14 @@ function App() {
     setSelectedForSplit(null);
   }, []);
 
-  const handleSaveLabeling = useCallback(() => {
-    setSelectedForLabeling(null);
-    refreshRecordings();
-  }, [refreshRecordings]);
-
   const handleCancelSplit = useCallback(() => {
     setSelectedForSplit(null);
   }, []);
 
   const handleCancelLabeling = useCallback(() => {
     setSelectedForLabeling(null);
-  }, []);
+    refreshRecordings(); // Refresh when closing to ensure updated state
+  }, [refreshRecordings]);
 
   return (
     <div style={{ 
@@ -233,7 +229,6 @@ function App() {
             {selectedForLabeling && (
               <LabelEditor 
                 recording={selectedForLabeling} 
-                onSave={handleSaveLabeling} 
                 onCancel={handleCancelLabeling} 
               />
             )}
