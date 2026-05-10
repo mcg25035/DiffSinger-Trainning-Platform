@@ -66,7 +66,19 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
 
   useEffect(() => {
     if (audioObjRef.current) {
-      audioObjRef.current.playbackRate = playbackRate;
+      const audio = audioObjRef.current;
+      const a = audio as any;
+      const rate = playbackRate;
+      
+      // Aggressively set preservesPitch
+      if ('preservesPitch' in a) a.preservesPitch = true;
+      if ('webkitPreservesPitch' in a) a.webkitPreservesPitch = true;
+      if ('mozPreservesPitch' in a) a.mozPreservesPitch = true;
+      
+      audio.playbackRate = rate;
+      
+      if ('preservesPitch' in a) a.preservesPitch = true;
+      if ('webkitPreservesPitch' in a) a.webkitPreservesPitch = true;
     }
   }, [playbackRate]);
 
@@ -99,7 +111,12 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         audio.onplay = () => setIsPlaying(true);
         audio.onpause = () => setIsPlaying(false);
         audio.onended = () => cleanup();
+        const a = audio as any;
+        if ('preservesPitch' in a) a.preservesPitch = true;
+        if ('webkitPreservesPitch' in a) a.webkitPreservesPitch = true;
+        if ('mozPreservesPitch' in a) a.mozPreservesPitch = true;
         audio.playbackRate = playbackRate;
+        if ('preservesPitch' in a) a.preservesPitch = true;
         // Prevent extension from seeing this audio object by not attaching it to DOM
         audioObjRef.current = audio;
     }

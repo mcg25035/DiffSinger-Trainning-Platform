@@ -1,8 +1,8 @@
 import requests
 import json
 
-wav_path = 'upload_segments/002.wav'
-lyrics = 'shi ra zu shi na tsu no u chi ni ki tsu tsu ke te shi ma ta ri'
+wav_path = 'upload_segments/2001.wav'
+lyrics = 'ta bu n jo u zu ta ta bu n ge de i i ne'
 
 with open('dictionaries/jp-romanji.json', 'r') as f:
     phonemes = json.load(f)

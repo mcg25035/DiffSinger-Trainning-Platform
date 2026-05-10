@@ -93,7 +93,25 @@ async function processMfaQueue() {
         for (const task of activeTasks) {
             const result = results[task.filename];
             if (result && !result.startsWith('ERROR:')) {
-                fs.writeFileSync(task.labPath, result);
+                // 儲存原始結果（含信心分數）到 .conf 檔案
+                const confPath = task.labPath.replace(/\.lab$/, '.conf');
+                fs.writeFileSync(confPath, result);
+
+                // 清理結果：移除信心分數、[!] 標記以及以 # 開頭的 metadata
+                const cleanedResult = result.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line && !line.startsWith('#'))
+                    .map(line => {
+                        const parts = line.split(/\s+/);
+                        // 只保留前三個欄位：開始時間 結束時間 音素
+                        if (parts.length >= 3) {
+                            return `${parts[0]} ${parts[1]} ${parts[2]}`;
+                        }
+                        return line;
+                    })
+                    .join('\n');
+                
+                fs.writeFileSync(task.labPath, cleanedResult);
                 jobs[task.jobId].status = 'completed';
             } else {
                 jobs[task.jobId].status = 'error';
@@ -379,6 +397,17 @@ app.get('/api/lab/:filename', (req, res) => {
         res.send(content);
     } else {
         res.status(404).send('Lab file not found');
+    }
+});
+
+app.get('/api/conf/:filename', (req, res) => {
+    const filename = req.params.filename.replace(/\.wav$/, '.conf');
+    const confPath = path.join(segmentsDir, filename);
+    if (fs.existsSync(confPath)) {
+        const content = fs.readFileSync(confPath, 'utf-8');
+        res.send(content);
+    } else {
+        res.status(404).send('Conf file not found');
     }
 });
 

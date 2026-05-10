@@ -8,11 +8,10 @@ from fastapi import FastAPI, UploadFile, File, Form, Query
 from fastapi.responses import PlainTextResponse
 import json
 from praatio import textgrid
+import asyncio
+import re
 
 app = FastAPI()
-
-import ast
-import re
 
 # 全域快取
 MODEL_LIST_CACHE = {"local": [], "remote": [], "timestamp": 0}
@@ -134,8 +133,6 @@ def ensure_mfa_model(model_name: str):
     
     MODEL_CHECK_CACHE.add(model_name)
 
-import asyncio
-
 def generate_custom_dictionary(lyrics: str, dict_map: dict, dict_path: str):
     """根據映射表生成 MFA 字典"""
     words = lyrics.strip().split()
@@ -205,49 +202,108 @@ async def align(
         output_dir = os.path.join(tmpdir, "output")
         
         try:
-            cmd = [
+            # 階段一：嚴格模式 (從 10 放寬到 30，減少正常音檔的誤報)
+            cmd_strict = [
                 "mfa", "align",
-                corpus_dir,
-                dict_path,
-                model,
-                output_dir,
+                corpus_dir, dict_path, model, output_dir,
                 "--clean", "--overwrite", "--no_debug",
                 f"--num_jobs={num_jobs}",
                 "--single_speaker",
-                "--beam", "100", "--retry_beam", "400"
+                "--beam", "30", "--retry_beam", "60"
             ]
             
-            print(f"DEBUG_EXEC: {' '.join(cmd)}")
-            
-            # Debug: 紀錄產生的字典內容
-            with open(dict_path, "r", encoding="utf-8") as df:
-                dict_content = df.read()
-                print(f"--- Generated Dictionary ---\n{dict_content}\n--------------------------")
-            
             proc = await asyncio.create_subprocess_exec(
-                *cmd,
+                *cmd_strict,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await proc.communicate()
+            await proc.communicate()
             
+            retry_used = False
             tg_path = os.path.join(output_dir, "audio.TextGrid")
             if not os.path.exists(tg_path):
                 tg_path = os.path.join(output_dir, "corpus", "audio.TextGrid")
             
+            # 如果失敗，進入階段二：寬鬆模式 (100/400)
             if not os.path.exists(tg_path):
-                return PlainTextResponse(f"MFA Error: {stderr.decode()}", status_code=500)
+                retry_used = True
+                cmd_loose = [
+                    "mfa", "align",
+                    corpus_dir, dict_path, model, output_dir,
+                    "--clean", "--overwrite", "--no_debug",
+                    f"--num_jobs={num_jobs}",
+                    "--single_speaker",
+                    "--beam", "100", "--retry_beam", "400"
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd_loose,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await proc.communicate()
+                
+                if not os.path.exists(tg_path):
+                    tg_path = os.path.join(output_dir, "audio.TextGrid")
+                    if not os.path.exists(tg_path):
+                        tg_path = os.path.join(output_dir, "corpus", "audio.TextGrid")
+
+                if not os.path.exists(tg_path):
+                    return PlainTextResponse(f"MFA Error (Loose mode failed): {stderr.decode()}", status_code=500)
                 
             tg = textgrid.openTextgrid(tg_path, includeEmptyIntervals=False)
             target_tier = tg.getTier(tier_type) if tier_type in tg.tierNames else tg.getTier(tg.tierNames[0])
             
+            # 從 SQLite 提取信心分數
+            import sqlite3
+            db_path = "/mfa/corpus/corpus.db"
+            scores = {}
+            if os.path.exists(db_path):
+                try:
+                    conn = sqlite3.connect(db_path)
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT pi.begin, pi.end, pi.phone_goodness 
+                        FROM phone_interval pi
+                    """)
+                    for b, e, score in cursor.fetchall():
+                        scores[(round(b, 4), round(e, 4))] = score
+                    conn.close()
+                except Exception as db_e:
+                    print(f"Database error: {db_e}")
+
             output_lines = []
+            all_scores = []
+            has_spn = False
             for start, end, label in target_tier.entries:
                 if label in ["<eps>", "sil", "sp", ""]: continue
+                if label == "spn": has_spn = True
+                
                 translated_label = rev_map.get(label, label)
                 s = int(float(start) * 10000000)
                 e = int(float(end) * 10000000)
-                output_lines.append(f"{s} {e} {translated_label}")
+                
+                score = scores.get((round(float(start), 4), round(float(end), 4)), 0.0)
+                all_scores.append(score)
+                
+                marker = ""
+                if score < -80.0:
+                    marker = " [!]"
+                output_lines.append(f"{s} {e} {translated_label} {score:.4f}{marker}")
+            
+            # 統計與狀態判定
+            if all_scores:
+                min_s = min(all_scores)
+                avg_s = sum(all_scores) / len(all_scores)
+                
+                # 基於測試數據設定門檻：最低分低於 -80 或是使用了 Retry，則標記為需人工審查
+                status = "SUCCESS"
+                if min_s < -80 or retry_used or has_spn:
+                    status = "WARNING_NEED_REVIEW"
+                
+                output_lines.append(f"# STATUS: {status}")
+                output_lines.append(f"# RETRY_USED: {retry_used}")
+                output_lines.append(f"# MIN_SCORE: {min_s:.4f}")
+                output_lines.append(f"# AVG_SCORE: {avg_s:.4f}")
                 
             return PlainTextResponse("\n".join(output_lines))
         except Exception as e:
@@ -284,8 +340,6 @@ async def align_batch(
         
         all_lyrics = ""
         for wav in wavs:
-            # 使用原始檔名或從 lyrics_data 匹配
-            # 為了安全，我們將檔名清理一下
             safe_name = "".join([c for c in wav.filename if c.isalnum() or c in "._-"])
             base_name = os.path.splitext(safe_name)[0]
             
@@ -293,10 +347,8 @@ async def align_batch(
             with open(wav_path, "wb") as f:
                 shutil.copyfileobj(wav.file, f)
             
-            # 獲取對應歌詞
             content = lyrics_data.get(wav.filename) or lyrics_data.get(safe_name) or ""
             if not content:
-                # 嘗試模糊匹配
                 for k, v in lyrics_data.items():
                     if k in safe_name or safe_name in k:
                         content = v
@@ -314,32 +366,24 @@ async def align_batch(
         output_dir = os.path.join(tmpdir, "output")
         
         try:
-            cmd = [
+            # 階段一：嚴格模式 (30/60)
+            cmd_strict = [
                 "mfa", "align",
-                corpus_dir,
-                dict_path,
-                model,
-                output_dir,
+                corpus_dir, dict_path, model, output_dir,
                 "--clean", "--overwrite", "--no_debug",
                 f"--num_jobs={num_jobs}",
                 "--single_speaker",
-                "--beam", "100", "--retry_beam", "400"
+                "--beam", "30", "--retry_beam", "60"
             ]
             
-            print(f"DEBUG_EXEC: {' '.join(cmd)}")
-            
-            # Debug: 紀錄產生的字典內容
-            with open(dict_path, "r", encoding="utf-8") as df:
-                dict_content = df.read()
-                print(f"--- Generated Dictionary ---\n{dict_content}\n--------------------------")
-            
             proc = await asyncio.create_subprocess_exec(
-                *cmd,
+                *cmd_strict,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await proc.communicate()
-            stderr_text = stderr.decode()
+            await proc.communicate()
+            
+            retry_used = False
             
             # 先遞迴找出所有的 TextGrid
             found_tgs = {}
@@ -348,21 +392,58 @@ async def align_batch(
                     if f.endswith(".TextGrid"):
                         found_tgs[f] = os.path.join(root, f)
             
-            # 如果執行失敗且完全沒產出檔案，才報錯
-            if proc.returncode != 0 and not found_tgs:
-                print(f"MFA Error (Exit {proc.returncode}): {stderr_text}")
-                return PlainTextResponse(f"MFA Error (Exit {proc.returncode}): {stderr_text}", status_code=500)
+            # 如果部分失敗，進入階段二：寬鬆模式 (100/400)
+            if len(found_tgs) < len(wavs):
+                retry_used = True
+                cmd_loose = [
+                    "mfa", "align",
+                    corpus_dir, dict_path, model, output_dir,
+                    "--clean", "--overwrite", "--no_debug",
+                    f"--num_jobs={num_jobs}",
+                    "--single_speaker",
+                    "--beam", "100", "--retry_beam", "400"
+                ]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd_loose,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                await proc.communicate()
+                
+                # 重新掃描 TextGrid
+                found_tgs = {}
+                for root, dirs, files in os.walk(output_dir):
+                    for f in files:
+                        if f.endswith(".TextGrid"):
+                            found_tgs[f] = os.path.join(root, f)
 
-            # 如果執行成功但沒產出檔案（例如音檔太短被跳過），也報錯
             if not found_tgs:
-                print(f"MFA finished but produced NO TextGrids. Stderr:\n{stderr_text}")
-                return PlainTextResponse(f"MFA finished but produced NO TextGrids. Stderr:\n{stderr_text}", status_code=500)
+                return PlainTextResponse(f"MFA Error: No TextGrids produced.", status_code=500)
+
+            # 從 SQLite 提取信心分數
+            import sqlite3
+            db_path = "/mfa/corpus/corpus.db"
+            db_scores = {}
+            if os.path.exists(db_path):
+                try:
+                    conn = sqlite3.connect(db_path)
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT pi.begin, pi.end, pi.phone_goodness, f.name
+                        FROM phone_interval pi
+                        JOIN utterance u ON pi.utterance_id = u.id
+                        JOIN file f ON u.file_id = f.id
+                    """)
+                    for b, e, score, fname in cursor.fetchall():
+                        db_scores[(fname, round(b, 4), round(e, 4))] = score
+                    conn.close()
+                except Exception as db_e:
+                    print(f"Database error in batch: {db_e}")
 
             for wav in wavs:
                 safe_name = "".join([c for c in wav.filename if c.isalnum() or c in "._-"])
                 base_name = os.path.splitext(safe_name)[0]
                 tg_name = f"{base_name}.TextGrid"
-                
                 tg_path = found_tgs.get(tg_name)
                 
                 if tg_path:
@@ -371,22 +452,41 @@ async def align_batch(
                         target_tier = tg.getTier(tier_type) if tier_type in tg.tierNames else tg.getTier(tg.tierNames[0])
                         
                         output_lines = []
+                        all_scores = []
+                        has_spn = False
                         for start, end, label in target_tier.entries:
                             if label in ["<eps>", "sil", "sp", ""]: continue
+                            if label == "spn": has_spn = True
+                            
                             translated_label = rev_map.get(label, label)
                             s = int(float(start) * 10000000)
                             e = int(float(end) * 10000000)
-                            output_lines.append(f"{s} {e} {translated_label}")
+                            
+                            score = db_scores.get((base_name, round(float(start), 4), round(float(end), 4)), 0.0)
+                            all_scores.append(score)
+                            
+                            marker = ""
+                            if score < -80.0:
+                                marker = " [!]"
+                            output_lines.append(f"{s} {e} {translated_label} {score:.4f}{marker}")
                         
+                        if all_scores:
+                            min_s = min(all_scores)
+                            avg_s = sum(all_scores) / len(all_scores)
+                            status = "SUCCESS"
+                            if min_s < -80 or retry_used or has_spn:
+                                status = "WARNING_NEED_REVIEW"
+                            
+                            output_lines.append(f"# STATUS: {status}")
+                            output_lines.append(f"# RETRY_USED: {retry_used}")
+                            output_lines.append(f"# MIN_SCORE: {min_s:.4f}")
+                            output_lines.append(f"# AVG_SCORE: {avg_s:.4f}")
+
                         results[wav.filename] = "\n".join(output_lines)
                     except Exception as e:
                         results[wav.filename] = f"ERROR: Failed to parse TextGrid: {str(e)}"
                 else:
-                    all_found = list(found_tgs.keys())
-                    results[wav.filename] = (
-                        f"ERROR: TextGrid not found for {wav.filename}. Expected: {tg_name}. "
-                        f"Found: {all_found}."
-                    )
+                    results[wav.filename] = "ERROR: TextGrid not produced for this file."
             
             return results
         except Exception as e:

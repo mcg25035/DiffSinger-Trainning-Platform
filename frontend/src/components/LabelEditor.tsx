@@ -4,6 +4,145 @@ import RegionsPlugin from 'wavesurfer.js/plugins/regions';
 import Spectrogram from 'wavesurfer.js/plugins/spectrogram';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 import type { Recording } from '../hooks/useAudioMonitor';
+import Crunker from 'crunker';
+
+/**
+ * usePreciseAudio Hook
+ * 
+ * Logic abstracted to prevent future regressions. 
+ * This hook handles:
+ * 1. Fetching original AudioBuffer via Crunker (ensures sample rate consistency)
+ * 2. Pitch-preserved playback via MediaElement (preservesPitch = true)
+ * 3. Slicing with Crunker (matching AudioSplitter.tsx logic)
+ * 4. Smooth cursor synchronization via requestAnimationFrame
+ */
+function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time: number) => void, onToggleIsPlaying: (playing: boolean) => void) {
+  const fullAudioBufferRef = useRef<AudioBuffer | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
+  const syncAnimRef = useRef<number | null>(null);
+  const [isAudioLoaded, setIsAudioLoaded] = useState(false);
+
+  useEffect(() => {
+    const CrunkerConstructor = (Crunker as any).default || Crunker;
+    const crunker = new CrunkerConstructor();
+    setIsAudioLoaded(false);
+    crunker.fetchAudio(url).then(([buffer]: AudioBuffer[]) => {
+      fullAudioBufferRef.current = buffer;
+      setIsAudioLoaded(true);
+    });
+    return () => {
+      stop();
+      fullAudioBufferRef.current = null;
+    };
+  }, [url]);
+
+  const applyPitchFix = (audio: HTMLAudioElement) => {
+    const a = audio as any;
+    if ('preservesPitch' in a) a.preservesPitch = true;
+    if ('webkitPreservesPitch' in a) a.webkitPreservesPitch = true;
+    if ('mozPreservesPitch' in a) a.mozPreservesPitch = true;
+  };
+
+  const stop = () => {
+    if (syncAnimRef.current) {
+      cancelAnimationFrame(syncAnimRef.current);
+      syncAnimRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    onToggleIsPlaying(false);
+  };
+
+  const startSyncLoop = (offset: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const sync = () => {
+      if (audioRef.current === audio && !audio.paused && !audio.ended) {
+        onTimeUpdate(offset + audio.currentTime);
+        syncAnimRef.current = requestAnimationFrame(sync);
+      }
+    };
+    syncAnimRef.current = requestAnimationFrame(sync);
+  };
+
+  const playRange = (start: number, end: number) => {
+    const fullBuffer = fullAudioBufferRef.current;
+    if (!fullBuffer) return;
+    stop();
+    const CrunkerConstructor = (Crunker as any).default || Crunker;
+    const crunker = new CrunkerConstructor();
+    const sliceBuffer = crunker.sliceAudio(fullBuffer, start, end);
+    const { blob } = crunker.export(sliceBuffer, "audio/wav");
+    const blobUrl = URL.createObjectURL(blob);
+    blobUrlRef.current = blobUrl;
+    const audio = new Audio(blobUrl);
+    applyPitchFix(audio);
+    audio.playbackRate = playbackRate;
+    applyPitchFix(audio);
+    audioRef.current = audio;
+    audio.onended = () => {
+      if (blobUrlRef.current === blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlRef.current = null; }
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+        onToggleIsPlaying(false);
+        onTimeUpdate(end);
+        if (syncAnimRef.current) cancelAnimationFrame(syncAnimRef.current);
+      }
+    };
+    audio.onplay = () => {
+      onToggleIsPlaying(true);
+      applyPitchFix(audio);
+      audio.playbackRate = playbackRate;
+      startSyncLoop(start);
+    };
+    audio.onpause = () => onToggleIsPlaying(false);
+    audio.play();
+  };
+
+  const playFull = (startTime: number) => {
+    stop();
+    const audio = new Audio(url);
+    applyPitchFix(audio);
+    audio.playbackRate = playbackRate;
+    applyPitchFix(audio);
+    audio.currentTime = startTime;
+    audioRef.current = audio;
+    audio.onended = () => {
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+        onToggleIsPlaying(false);
+        onTimeUpdate(audio.duration); // Force sync to exact end on finish
+        if (syncAnimRef.current) cancelAnimationFrame(syncAnimRef.current);
+      }
+    };
+    audio.onplay = () => {
+      onToggleIsPlaying(true);
+      applyPitchFix(audio);
+      audio.playbackRate = playbackRate;
+      startSyncLoop(0);
+    };
+    audio.onpause = () => onToggleIsPlaying(false);
+    audio.play();
+  };
+
+  useEffect(() => {
+    if (audioRef.current) {
+        applyPitchFix(audioRef.current);
+        audioRef.current.playbackRate = playbackRate;
+        applyPitchFix(audioRef.current);
+    }
+  }, [playbackRate]);
+
+  return { playRange, playFull, stop, isAudioLoaded };
+}
 
 interface Props {
   recording: Recording;
@@ -14,6 +153,7 @@ interface LabSegment {
   start: number;
   end: number;
   label: string;
+  score?: number;
 }
 
 interface WordInstance {
@@ -45,40 +185,78 @@ export function LabelEditor({ recording, onCancel }: Props) {
   const [isDirty, setIsDirty] = useState(false);
   const [lyricsCount, setLyricsCount] = useState(0);
 
+  const { playRange, playFull, stop: stopAudio, isAudioLoaded } = usePreciseAudio(
+    recording.url, 
+    playbackRate, 
+    (t) => wavesurferRef.current?.setTime(t), 
+    (p) => setIsPlaying(p)
+  );
+
   const parseLab = (content: string): LabSegment[] => {
     return content.split('\n')
       .map(line => line.trim())
       .filter(line => line.length > 0)
-      .map(line => {
+      .map((line): LabSegment | null => {
         const parts = line.split(/\s+/);
         if (parts.length < 3) return null;
         const [startStr, endStr, ...labelParts] = parts;
-        const label = labelParts.join(' ');
+        
+        // 解析標籤：有些舊標籤可能已經包含了信心值，我們只取第一個空格前的內容作為標籤
+        let label = labelParts[0];
+        let score: number | undefined = undefined;
+        
+        if (labelParts.length >= 2) {
+          const possibleScore = parseFloat(labelParts[1]);
+          if (!isNaN(possibleScore)) {
+            score = possibleScore;
+          }
+        }
+
         let start = parseFloat(startStr);
         let end = parseFloat(endStr);
         if (start > 100000 || end > 100000) {
             start /= 10000000;
             end /= 10000000;
         }
-        return { start, end, label };
+        return { start, end, label, score };
       })
       .filter((s): s is LabSegment => s !== null);
   };
 
-  const createLabelElement = (label: string, level: number) => {
+  const createLabelElement = (label: string, level: number, score?: number) => {
     const div = document.createElement('div');
-    div.textContent = label;
-    div.style.color = '#fff';
-    div.style.fontSize = '13px';
-    div.style.fontWeight = '900';
-    div.style.textShadow = '2px 2px 4px #000';
+    div.style.display = 'flex';
+    div.style.flexDirection = 'column';
+    div.style.pointerEvents = 'none';
     div.style.position = 'absolute';
-    const tops = ['10px', '40px'];
+    const tops = ['5px', '45px'];
     div.style.top = tops[level % 2];
     div.style.left = '5px';
-    div.style.whiteSpace = 'nowrap';
-    div.style.pointerEvents = 'none';
+    
+    // 將數據同時存在容器上以便快速提取
     div.setAttribute('data-label-text', label);
+    if (score !== undefined) div.setAttribute('data-label-score', score.toString());
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = label;
+    labelSpan.style.color = '#fff';
+    labelSpan.style.fontSize = '13px';
+    labelSpan.style.fontWeight = '900';
+    labelSpan.style.textShadow = '2px 2px 4px #000';
+    // 移除子元素的屬性，統一從父元素讀取，避免混淆
+    div.appendChild(labelSpan);
+
+    if (score !== undefined) {
+      const scoreSpan = document.createElement('span');
+      scoreSpan.textContent = `[${score.toFixed(2)}]`; // 加上中括號以便視覺區分
+      scoreSpan.style.color = score < -80 ? '#ff4444' : '#00e676';
+      scoreSpan.style.fontSize = '9px';
+      scoreSpan.style.fontWeight = 'bold';
+      scoreSpan.style.opacity = '0.7';
+      scoreSpan.style.marginTop = '-1px';
+      div.appendChild(scoreSpan);
+    }
+
     return div;
   };
 
@@ -95,20 +273,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
   };
 
   const precisePlayRange = (start: number, end: number) => {
-    const ws = wavesurferRef.current;
-    if (!ws) return;
-    
-    const rate = ws.getPlaybackRate();
-    const duration = end - start;
-    const correctedEnd = start + (duration / rate);
-    
-    const onPause = () => {
-      ws.setTime(end); 
-      ws.un('pause', onPause);
-    };
-    ws.once('pause', onPause);
-
-    ws.play(start, correctedEnd);
+    playRange(start, end);
   };
 
   const saveHistory = () => {
@@ -138,7 +303,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
                 regionsRef.current?.addRegion({
                     start: seg.start,
                     end: seg.end,
-                    content: createLabelElement(seg.label, level),
+                    content: createLabelElement(seg.label, level, seg.score),
                     color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
                     drag: false,
                     resize: true,
@@ -201,10 +366,29 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
   const loadLabels = async (regions: RegionsPlugin) => {
     try {
-      const res = await fetch(`/api/lab/${encodeURIComponent(recording.filename)}`);
-      if (res.ok) {
-        const content = await res.text();
-        const segments = parseLab(content);
+      const [labRes, confRes] = await Promise.all([
+        fetch(`/api/lab/${encodeURIComponent(recording.filename)}`),
+        fetch(`/api/conf/${encodeURIComponent(recording.filename)}`).catch(() => null)
+      ]);
+
+      if (labRes.ok) {
+        const labContent = await labRes.text();
+        const confContent = confRes && confRes.ok ? await confRes.text() : null;
+        
+        const segments = parseLab(labContent);
+        const confSegments = confContent ? parseLab(confContent) : [];
+        
+        // 合併信心分數
+        if (confSegments.length > 0) {
+          segments.forEach(seg => {
+            const match = confSegments.find(cs => 
+              Math.abs(cs.start - seg.start) < 0.001 && 
+              Math.abs(cs.end - seg.end) < 0.001 &&
+              cs.label === seg.label
+            );
+            if (match) seg.score = match.score;
+          });
+        }
         
         const ws = wavesurferRef.current;
         const duration = ws ? ws.getDuration() : 0;
@@ -231,7 +415,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
           regions.addRegion({
             start: seg.start,
             end: seg.end,
-            content: createLabelElement(seg.label, level),
+            content: createLabelElement(seg.label, level, seg.score),
             color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
             drag: false, // 關閉整塊拖動，讓滑鼠可以穿透去拖動時間軸
             resize: true,
@@ -240,8 +424,8 @@ export function LabelEditor({ recording, onCancel }: Props) {
         setLabelsCount(filledSegments.length);
         setUndoStack([stringifyLab(regions.getRegions())]);
       } else {
-        const txt = await res.text();
-        setError(`Failed to load: ${res.status} ${txt}`);
+        const txt = await labRes.text();
+        setError(`Failed to load: ${labRes.status} ${txt}`);
         setLabelsCount(0);
       }
     } catch (err) {
@@ -264,6 +448,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
       minPxPerSec: zoomLevel,
       backend: 'WebAudio',
     });
+    ws.setVolume(0); // Mute WaveSurfer audio, we use custom Audio object for pitch preservation
     const regions = ws.registerPlugin(RegionsPlugin.create());
     ws.registerPlugin(
       Spectrogram.create({
@@ -307,17 +492,23 @@ export function LabelEditor({ recording, onCancel }: Props) {
       const regions = regionsRef.current;
       if (!ws || !regions) return;
 
-      // Get relative time from mouse position
+      // 使用 WaveSurfer 內建方法獲取精確點擊時間
       const rect = containerRef.current!.getBoundingClientRect();
       const x = e.clientX - rect.left;
+      const duration = ws.getDuration();
       const scrollLeft = ws.getWrapper().scrollLeft;
-      const totalWidth = ws.getWrapper().scrollWidth;
-      const time = ((x + scrollLeft) / totalWidth) * ws.getDuration();
+      const scrollWidth = ws.getWrapper().scrollWidth;
+      const time = ((x + scrollLeft) / scrollWidth) * duration;
+
+      console.log(`[CONTEXT-MENU] x:${x}, scrollLeft:${scrollLeft}, scrollWidth:${scrollWidth}, time:${time}`);
 
       const all = regions.getRegions().sort((a, b) => a.start - b.start);
-      const target = all.find(reg => time >= reg.start && time <= reg.end);
+      // 增加一點容錯率
+      const target = all.find(reg => time >= reg.start - 0.005 && time <= reg.end + 0.005);
+      
       if (target) {
         setSelectedRegion(target);
+        // 直接從容器屬性讀取標籤，這保證了讀取到的是純淨的標籤文字
         setEditLabel(target.content?.getAttribute('data-label-text') || '');
       }
     };
@@ -332,12 +523,15 @@ export function LabelEditor({ recording, onCancel }: Props) {
         if (target) {
             const oldEnd = target.end;
             const oldLabel = target.content?.getAttribute('data-label-text') || '';
+            const oldScoreAttr = target.content?.getAttribute('data-label-score');
+            const oldScore = oldScoreAttr ? parseFloat(oldScoreAttr) : undefined;
+
             isUpdatingRef.current = true;
             target.setOptions({ end: time });
             regions.addRegion({
                 start: time,
                 end: oldEnd,
-                content: createLabelElement(oldLabel, 0),
+                content: createLabelElement(oldLabel, 0, oldScore),
                 color: 'rgba(0, 229, 255, 0.1)',
                 drag: false,
                 resize: true,
@@ -347,10 +541,12 @@ export function LabelEditor({ recording, onCancel }: Props) {
             newAll.forEach((r, idx) => {
                 const level = idx % 2;
                 const label = r.content?.getAttribute('data-label-text') || '';
+                const scoreAttr = r.content?.getAttribute('data-label-score');
+                const score = scoreAttr ? parseFloat(scoreAttr) : undefined;
                 const isWarning = label === '!';
                 r.setOptions({ 
                     color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
-                    content: createLabelElement(label, level),
+                    content: createLabelElement(label, level, score),
                     drag: false
                 });
             });
@@ -405,12 +601,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
         wavesurferRef.current.zoom(zoomLevel);
     }
   }, [zoomLevel, isLoaded]);
-
-  useEffect(() => {
-    if (wavesurferRef.current) {
-        wavesurferRef.current.setPlaybackRate(playbackRate);
-    }
-  }, [playbackRate]);
 
   useEffect(() => {
     if (isLoaded) {
@@ -473,9 +663,11 @@ export function LabelEditor({ recording, onCancel }: Props) {
       const idx = all.indexOf(selectedRegion);
       const level = idx !== -1 ? idx % 2 : 0;
       const isWarning = editLabel === '!';
+      const scoreAttr = selectedRegion.content?.getAttribute('data-label-score');
+      const score = scoreAttr ? parseFloat(scoreAttr) : undefined;
       
       selectedRegion.setOptions({ 
-          content: createLabelElement(editLabel, level),
+          content: createLabelElement(editLabel, level, score),
           color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)')
       });
       setSelectedRegion(null);
@@ -494,10 +686,12 @@ export function LabelEditor({ recording, onCancel }: Props) {
         newAll.forEach((r, i) => {
             const level = i % 2;
             const label = r.content?.getAttribute('data-label-text') || '';
+            const scoreAttr = r.content?.getAttribute('data-label-score');
+            const score = scoreAttr ? parseFloat(scoreAttr) : undefined;
             const isWarning = label === '!';
             r.setOptions({ 
                 color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
-                content: createLabelElement(label, level)
+                content: createLabelElement(label, level, score)
             });
         });
         
@@ -553,11 +747,19 @@ export function LabelEditor({ recording, onCancel }: Props) {
   const handleFullPlay = () => {
     const ws = wavesurferRef.current;
     if (!ws) return;
+
     if (isPlaying) {
-      ws.pause();
-    } else {
-      ws.play(0);
+      stopAudio();
+      return;
     }
+
+    let startTime = ws.getCurrentTime();
+    // If we are at the end (with a small epsilon), restart from the beginning
+    if (startTime >= ws.getDuration() - 0.05) {
+        startTime = 0;
+    }
+
+    playFull(startTime);
   };
 
   return (
@@ -586,21 +788,21 @@ export function LabelEditor({ recording, onCancel }: Props) {
             <div style={{ display: 'flex', gap: '8px' }}>
                 <button 
                   onClick={handleWordPlay} 
-                  disabled={!isLoaded} 
+                  disabled={!isLoaded || !isAudioLoaded} 
                   style={{ background: '#222', border: '1px solid #00e5ff', color: '#fff', borderRadius: '8px', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
                 >
                     WORD-PLAY
                 </button>
                 <button 
                   onClick={handlePhonemePlay} 
-                  disabled={!isLoaded} 
+                  disabled={!isLoaded || !isAudioLoaded} 
                   style={{ background: '#222', border: '1px solid #ffea00', color: '#fff', borderRadius: '8px', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
                 >
                     PHONEME-PLAY
                 </button>
                 <button 
                   onClick={handleFullPlay} 
-                  disabled={!isLoaded} 
+                  disabled={!isLoaded || !isAudioLoaded} 
                   style={{ background: '#222', border: '1px solid #666', color: isPlaying ? '#00e676' : '#fff', borderRadius: '8px', padding: '10px 16px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
                 >
                     {isPlaying ? 'PAUSE' : 'FULL-PLAY'}
@@ -617,7 +819,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
                     <span style={{ minWidth: '30px' }}>{playbackRate.toFixed(1)}x</span>
                 </div>
                 <span>
-                    {error ? <span style={{ color: '#ff4444' }}>{error}</span> : (labelsCount === null ? 'Loading...' : `${labelsCount} labels loaded`)}
+                    {error ? <span style={{ color: '#ff4444' }}>{error}</span> : (!isLoaded || !isAudioLoaded ? 'Loading...' : `${labelsCount} labels loaded`)}
                 </span>
             </div>
         </div>
