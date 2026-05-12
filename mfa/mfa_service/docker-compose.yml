@@ -6,7 +6,7 @@ services:
     image: mfa-aligner-service:latest
     container_name: mfa_aligner_api
     ports:
-      - "8001:8001"
+      - "${MFA_PORT:-8001}:8001"
     volumes:
       - mfa_data:/home/mfauser/Documents/MFA
       - ./app:/app

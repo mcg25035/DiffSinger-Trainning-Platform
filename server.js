@@ -7,7 +7,8 @@ const axios = require('axios');
 const FormData = require('form-data');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+require('dotenv').config();
+const PORT = process.env.BACKEND_PORT || 3010;
 
 app.use(cors());
 app.use(express.static('public'));
@@ -82,7 +83,7 @@ async function processMfaQueue() {
     form.append('lyrics_json', JSON.stringify(lyricsData));
 
     try {
-        const response = await axios.post('http://localhost:8001/align_batch?model=japanese_mfa&tier_type=phones', form, {
+        const response = await axios.post(`http://localhost:${process.env.MFA_PORT || 8001}/align_batch?model=japanese_mfa&tier_type=phones`, form, {
             headers: form.getHeaders(),
             maxContentLength: Infinity,
             maxBodyLength: Infinity,
@@ -201,7 +202,7 @@ app.delete('/api/mappings/:id', (req, res) => {
 
 app.get('/api/mfa/models', async (req, res) => {
     try {
-        const response = await axios.get('http://localhost:8001/models');
+        const response = await axios.get(`http://localhost:${process.env.MFA_PORT || 8001}/models`);
         res.json(response.data);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -210,7 +211,7 @@ app.get('/api/mfa/models', async (req, res) => {
 
 app.get('/api/mfa/phones/:model', async (req, res) => {
     try {
-        const response = await axios.get(`http://localhost:8001/model_phones/${req.params.model}`);
+        const response = await axios.get(`http://localhost:${process.env.MFA_PORT || 8001}/model_phones/${req.params.model}`);
         res.json(response.data);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -282,7 +283,7 @@ async function transcribeFile(filename) {
         const form = new FormData();
         form.append('file', fs.createReadStream(wavPath));
 
-        const response = await axios.post('http://localhost:8000/transcribe', form, {
+        const response = await axios.post(`http://localhost:${process.env.LYRICS_PORT || 8000}/transcribe`, form, {
             headers: form.getHeaders(),
             timeout: 120000 
         });
@@ -327,7 +328,7 @@ app.post('/api/validate_lyrics', express.json(), async (req, res) => {
     try {
         const form = new FormData();
         form.append('romanji_lyrics', lyrics);
-        const response = await axios.post(`http://localhost:8001/validate_lyrics?model=${model || 'japanese_mfa'}`, form, {
+        const response = await axios.post(`http://localhost:${process.env.MFA_PORT || 8001}/validate_lyrics?model=${model || 'japanese_mfa'}`, form, {
             headers: form.getHeaders()
         });
         res.json(response.data);
