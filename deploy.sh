@@ -14,6 +14,10 @@ fi
 chmod +x scripts/resolve_env.sh
 source scripts/resolve_env.sh
 
+# 執行連接埠衝突測試
+chmod +x scripts/check_ports.sh
+bash scripts/check_ports.sh
+
 echo "📦 [1/4] 安裝相依套件..."
 npm install --quiet
 cd frontend && npm install --quiet && cd ..
@@ -119,8 +123,8 @@ fi
 
 echo "------------------------------------------------"
 echo "✨ 部署完成！"
-echo "🌐 前端地址: http://localhost:3000"
-echo "🎤 MFA API: http://localhost:8001"
-echo "📝 Lyrics API: http://localhost:8000"
+echo "🌐 平台地址: http://localhost:${BACKEND_PORT:-3010}"
+echo "🎤 MFA API: http://localhost:${MFA_PORT:-8001}"
+echo "📝 Lyrics API: http://localhost:${LYRICS_PORT:-8000}"
 echo "------------------------------------------------"
 echo "使用 './update.sh' 可以快速獲取更新並重啟服務。"
