@@ -1,0 +1,26 @@
+name: Deploy to Self-Hosted Server
+
+on:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authorize Deployment (CI Trust)
+        run: |
+          # 在自建 Runner 上，自動授權此次從 GitHub 推送下來的代碼
+          chmod +x scripts/trust_manager.sh
+          ./scripts/trust_manager.sh COMMIT
+
+      - name: Execute Deployment
+        run: |
+          chmod +x deploy.sh
+          ./deploy.sh

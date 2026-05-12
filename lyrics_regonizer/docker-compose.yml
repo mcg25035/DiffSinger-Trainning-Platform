@@ -1,14 +1,13 @@
 services:
   sensevoice-hira-api:
-    build: .
+    build:
+      context: .
+      args:
+        BASE_IMAGE: nvidia/cuda:${BASE_IMAGE_TAG:-11.0.3-base-ubuntu20.04}
+        PYTORCH_INDEX: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu110}
+        TORCH_VERSION: ${TORCH_VERSION:-1.7.1+cu110}
+        TORCHAUDIO_VERSION: ${TORCHAUDIO_VERSION:-0.7.2}
     image: sensevoice-hira-api
     ports:
-      - "8000:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - "${LYRICS_PORT:-8000}:8000"
     restart: unless-stopped
