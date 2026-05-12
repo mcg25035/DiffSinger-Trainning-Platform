@@ -99,7 +99,7 @@ EOF
     SUDOERS_FILE="/etc/sudoers.d/ds-services-${USER}"
     if [ ! -f "$SUDOERS_FILE" ]; then
         echo "🔐 正在設定免密碼服務重啟權限 (Sudoers)..."
-        echo "${USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ds-mfa, /usr/bin/systemctl restart ds-lyrics, /usr/bin/journalctl" | sudo tee "$SUDOERS_FILE" > /dev/null
+        echo "${USER} ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ds-mfa, /usr/bin/systemctl restart ds-lyrics" | sudo tee "$SUDOERS_FILE" > /dev/null
         sudo chmod 440 "$SUDOERS_FILE"
     fi
 fi
