@@ -11,16 +11,23 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Authorize Deployment (CI Trust)
+      - name: Deploy to Production Directory
         run: |
-          # 在自建 Runner 上，自動授權此次從 GitHub 推送下來的代碼
+          # 定義您的正式專案路徑
+          PROD_DIR="/home/codingbear/DiffSinger-Trainning-Platform"
+          
+          # 進入正式目錄
+          cd "$PROD_DIR"
+          
+          # 確保代碼是最新的
+          git fetch origin master
+          git reset --hard origin/master
+          
+          # 授權本次更新 (因為是由 CI 觸發，我們自動信任)
           chmod +x scripts/trust_manager.sh
           ./scripts/trust_manager.sh COMMIT
-
-      - name: Execute Deployment
-        run: |
+          
+          # 執行部署腳本
+          # 因為我們剛剛修改了 deploy.sh，它現在不會在路徑相同時再次要求 Sudo 密碼
           chmod +x deploy.sh
           ./deploy.sh
