@@ -223,19 +223,28 @@ export function LabelEditor({ recording, onCancel }: Props) {
       .filter((s): s is LabSegment => s !== null);
   };
 
-  const createLabelElement = (label: string, level: number, score?: number) => {
+  const getConfidenceColor = (score?: number) => {
+    if (score === undefined) return 'rgba(255,255,255,0.4)';
+    const s = Math.abs(score);
+    // 假設 -100 是極差的分數，0 是完美的分數
+    const factor = Math.min(1, s / 100);
+    const r = 255;
+    const g = Math.round(255 * (1 - factor));
+    const b = Math.round(255 * (1 - factor));
+    return `rgb(${r}, ${g}, ${b})`;
+  };
+
+  const createLabelElement = (label: string, level: number) => {
     const div = document.createElement('div');
     div.style.display = 'flex';
     div.style.flexDirection = 'column';
     div.style.pointerEvents = 'none';
     div.style.position = 'absolute';
-    const tops = ['5px', '45px'];
+    const tops = ['10px', '50px'];
     div.style.top = tops[level % 2];
     div.style.left = '5px';
     
-    // 將數據同時存在容器上以便快速提取
     div.setAttribute('data-label-text', label);
-    if (score !== undefined) div.setAttribute('data-label-score', score.toString());
 
     const labelSpan = document.createElement('span');
     labelSpan.textContent = label;
@@ -243,21 +252,27 @@ export function LabelEditor({ recording, onCancel }: Props) {
     labelSpan.style.fontSize = '13px';
     labelSpan.style.fontWeight = '900';
     labelSpan.style.textShadow = '2px 2px 4px #000';
-    // 移除子元素的屬性，統一從父元素讀取，避免混淆
     div.appendChild(labelSpan);
 
-    if (score !== undefined) {
-      const scoreSpan = document.createElement('span');
-      scoreSpan.textContent = `[${score.toFixed(2)}]`; // 加上中括號以便視覺區分
-      scoreSpan.style.color = score < -80 ? '#ff4444' : '#00e676';
-      scoreSpan.style.fontSize = '9px';
-      scoreSpan.style.fontWeight = 'bold';
-      scoreSpan.style.opacity = '0.7';
-      scoreSpan.style.marginTop = '-1px';
-      div.appendChild(scoreSpan);
-    }
-
     return div;
+  };
+
+  const applyRegionStyle = (region: Region, label: string, level: number, score?: number) => {
+    const isWarning = label === '!';
+    const confColor = getConfidenceColor(score);
+    
+    // 設定背景顏色
+    region.setOptions({
+        color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
+    });
+
+    // 透過 CSS 變數控制邊界顏色
+    if (region.element) {
+        region.element.style.setProperty('--region-border-color', confColor);
+        if (score !== undefined) {
+            region.element.setAttribute('data-label-score', score.toString());
+        }
+    }
   };
 
   const stringifyLab = (regions: Region[]): string => {
@@ -299,15 +314,14 @@ export function LabelEditor({ recording, onCancel }: Props) {
             regionsRef.current.clearRegions();
             segments.forEach((seg, i) => {
                 const level = i % 2;
-                const isWarning = seg.label === '!';
-                regionsRef.current?.addRegion({
+                const reg = regionsRef.current?.addRegion({
                     start: seg.start,
                     end: seg.end,
-                    content: createLabelElement(seg.label, level, seg.score),
-                    color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
+                    content: createLabelElement(seg.label, level),
                     drag: false,
                     resize: true,
                 });
+                if (reg) applyRegionStyle(reg, seg.label, level, seg.score);
             });
             setLabelsCount(segments.length);
             isUpdatingRef.current = false;
@@ -411,15 +425,14 @@ export function LabelEditor({ recording, onCancel }: Props) {
         regions.clearRegions();
         filledSegments.forEach((seg, i) => {
           const level = i % 2;
-          const isWarning = seg.label === '!';
-          regions.addRegion({
+          const reg = regions.addRegion({
             start: seg.start,
             end: seg.end,
-            content: createLabelElement(seg.label, level, seg.score),
-            color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
+            content: createLabelElement(seg.label, level),
             drag: false, // 關閉整塊拖動，讓滑鼠可以穿透去拖動時間軸
             resize: true,
           });
+          if (reg) applyRegionStyle(reg, seg.label, level, seg.score);
         });
         setLabelsCount(filledSegments.length);
         setUndoStack([stringifyLab(regions.getRegions())]);
@@ -528,14 +541,15 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
             isUpdatingRef.current = true;
             target.setOptions({ end: time });
-            regions.addRegion({
+            const newReg = regions.addRegion({
                 start: time,
                 end: oldEnd,
-                content: createLabelElement(oldLabel, 0, oldScore),
-                color: 'rgba(0, 229, 255, 0.1)',
+                content: createLabelElement(oldLabel, 0),
                 drag: false,
                 resize: true,
             });
+            if (newReg) applyRegionStyle(newReg, oldLabel, 0, oldScore);
+            
             isUpdatingRef.current = false;
             const newAll = regions.getRegions().sort((a, b) => a.start - b.start);
             newAll.forEach((r, idx) => {
@@ -543,12 +557,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
                 const label = r.content?.getAttribute('data-label-text') || '';
                 const scoreAttr = r.content?.getAttribute('data-label-score');
                 const score = scoreAttr ? parseFloat(scoreAttr) : undefined;
-                const isWarning = label === '!';
-                r.setOptions({ 
-                    color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
-                    content: createLabelElement(label, level, score),
-                    drag: false
-                });
+                applyRegionStyle(r, label, level, score);
             });
             setLabelsCount(newAll.length);
             saveHistory();
@@ -662,14 +671,16 @@ export function LabelEditor({ recording, onCancel }: Props) {
       const all = regionsRef.current?.getRegions().sort((a, b) => a.start - b.start) || [];
       const idx = all.indexOf(selectedRegion);
       const level = idx !== -1 ? idx % 2 : 0;
-      const isWarning = editLabel === '!';
-      const scoreAttr = selectedRegion.content?.getAttribute('data-label-score');
+      // 同時檢查 content 和 element 的屬性以相容舊有的渲染
+      const scoreAttr = selectedRegion.element?.getAttribute('data-label-score') || 
+                        selectedRegion.content?.getAttribute('data-label-score');
       const score = scoreAttr ? parseFloat(scoreAttr) : undefined;
       
       selectedRegion.setOptions({ 
-          content: createLabelElement(editLabel, level, score),
-          color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)')
+          content: createLabelElement(editLabel, level)
       });
+      applyRegionStyle(selectedRegion, editLabel, level, score);
+
       setSelectedRegion(null);
       saveHistory();
       runAlignment(lyrics);
@@ -686,13 +697,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
         newAll.forEach((r, i) => {
             const level = i % 2;
             const label = r.content?.getAttribute('data-label-text') || '';
-            const scoreAttr = r.content?.getAttribute('data-label-score');
+            const scoreAttr = r.element?.getAttribute('data-label-score') || 
+                              r.content?.getAttribute('data-label-score');
             const score = scoreAttr ? parseFloat(scoreAttr) : undefined;
-            const isWarning = label === '!';
-            r.setOptions({ 
-                color: isWarning ? 'rgba(255, 0, 0, 0.4)' : (level === 0 ? 'rgba(0, 229, 255, 0.15)' : 'rgba(0, 229, 255, 0.05)'),
-                content: createLabelElement(label, level, score)
-            });
+            applyRegionStyle(r, label, level, score);
         });
         
         setLabelsCount(newAll.length);
@@ -851,8 +859,12 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
       <style dangerouslySetInnerHTML={{ __html: `
         #label-editor-waveform ::part(region) {
-          border-right: 1px solid rgba(255,255,255,0.4) !important;
-          border-left: 1px solid rgba(255,255,255,0.4) !important;
+          border-left: 3px solid var(--region-border-color, rgba(255,255,255,0.4)) !important;
+          border-right: 1px solid rgba(255,255,255,0.1) !important;
+          transition: border-left-color 0.2s ease;
+        }
+        #label-editor-waveform ::part(region-handle) {
+          width: 8px !important;
         }
         .spin {
             animation: spin 2s linear infinite;

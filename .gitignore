@@ -3,6 +3,8 @@ node_modules
 upload_segments
 uploads
 .env
-# Local deployment trust state
 .ds_trusted
 __pycache__/
+.antigravitycli
+screenshot
+public
