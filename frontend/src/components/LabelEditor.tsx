@@ -93,7 +93,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
       if (audioRef.current === audio) {
         audioRef.current = null;
         onToggleIsPlaying(false);
-        onTimeUpdate(end);
+        onTimeUpdate(start);
         if (syncAnimRef.current) cancelAnimationFrame(syncAnimRef.current);
       }
     };
