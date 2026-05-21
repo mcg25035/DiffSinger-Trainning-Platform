@@ -27,6 +27,22 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
     
     const regions = ws.registerPlugin(RegionsPlugin.create());
     
+    let currentZoom = 0;
+    const handleWheel = (e: WheelEvent) => {
+        if (e.ctrlKey) {
+            e.preventDefault();
+            if (currentZoom === 0) {
+                // Approximate initial zoom to prevent sudden jump
+                const duration = ws.getDuration();
+                const width = containerRef.current?.clientWidth || 800;
+                currentZoom = width / duration;
+            }
+            currentZoom = Math.min(5000, Math.max(10, currentZoom + (e.deltaY > 0 ? -50 : 50)));
+            ws.zoom(currentZoom);
+        }
+    };
+    containerRef.current.addEventListener('wheel', handleWheel, { passive: false });
+    
     ws.on('decode', () => {
       const buffer = ws.getDecodedData();
       if (buffer) {
@@ -45,6 +61,7 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
     ws.load(url);
 
     return () => {
+        containerRef.current?.removeEventListener('wheel', handleWheel);
         ws.destroy();
     };
   }, [url, onReady]); 

@@ -99,16 +99,33 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Delete' || e.key === 'Backspace') {
             if (selectedRegion && regionsRef.current) {
+                const allRegions = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+                const idx = allRegions.indexOf(selectedRegion);
+                const prev = idx > 0 ? allRegions[idx - 1] : null;
+                const next = idx < allRegions.length - 1 ? allRegions[idx + 1] : null;
+                const bStart = selectedRegion.start;
+                const bEnd = selectedRegion.end;
+
                 selectedRegion.remove();
                 setSelectedRegion(null);
                 
+                isUpdatingRef.current = true;
+
+                if (prev) {
+                    prev.setOptions({ end: bEnd });
+                } else if (next) {
+                    next.setOptions({ start: bStart });
+                }
+
                 // Recalculate colors for remaining regions
-                const all = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
-                all.forEach((r, i) => {
+                const newAll = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+                newAll.forEach((r, i) => {
                     r.setOptions({
                         color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'
                     });
                 });
+
+                isUpdatingRef.current = false;
             }
         }
     };
