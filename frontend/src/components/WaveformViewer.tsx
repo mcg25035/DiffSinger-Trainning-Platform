@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, memo } from 'react';
+import { useEffect, useRef, memo } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/plugins/regions';
 
@@ -10,7 +10,6 @@ interface WaveformProps {
 
 export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [maxAmplitude, setMaxAmplitude] = useState(0.01); // Initial small non-zero value
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -48,17 +47,6 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
     containerRef.current.addEventListener('wheel', handleWheel, { passive: false });
     
     ws.on('decode', () => {
-      const buffer = ws.getDecodedData();
-      if (buffer) {
-          const data = buffer.getChannelData(0);
-          let max = 0;
-          for (let i = 0; i < data.length; i++) {
-              const v = Math.abs(data[i]);
-              if (v > max) max = v;
-          }
-          // Update peak amplitude to match WaveSurfer's normalize scaling
-          setMaxAmplitude(max || 0.01);
-      }
       onReady(ws, regions);
     });
 
