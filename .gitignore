@@ -12,3 +12,4 @@ exp-mfa-pretrain
 find_c.py
 fix_lab.py
 check_coverage.py
+update_verify.py

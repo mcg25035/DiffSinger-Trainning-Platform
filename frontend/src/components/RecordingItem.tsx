@@ -14,6 +14,7 @@ interface Props {
 export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId }: Props) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [markerProgress, setMarkerProgress] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isAligning, setIsAligning] = useState(false);
@@ -119,6 +120,13 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         if ('preservesPitch' in a) a.preservesPitch = true;
         // Prevent extension from seeing this audio object by not attaching it to DOM
         audioObjRef.current = audio;
+        
+        audio.addEventListener('loadedmetadata', () => {
+            if (audio.duration) {
+                audio.currentTime = (markerProgress / 100) * audio.duration;
+                setProgress(markerProgress);
+            }
+        });
     }
 
     if (isPlaying) {
@@ -128,6 +136,10 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
             progressTimerRef.current = null;
         }
     } else {
+        if (audioObjRef.current.readyState >= 1 && audioObjRef.current.duration) {
+            audioObjRef.current.currentTime = (markerProgress / 100) * audioObjRef.current.duration;
+            setProgress(markerProgress);
+        }
         audioObjRef.current.play();
         progressTimerRef.current = window.setInterval(() => {
             if (audioObjRef.current && audioObjRef.current.duration) {
@@ -364,6 +376,41 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
               pointerEvents: 'none',
               boxShadow: '0 0 2px rgba(0,0,0,0.5)'
             }} />
+            <div style={{
+              position: 'absolute',
+              left: `${markerProgress}%`,
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              background: '#ff9800',
+              cursor: 'ew-resize',
+              boxShadow: '0 0 2px rgba(0,0,0,0.5)',
+              zIndex: 10
+            }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              const div = e.currentTarget.parentElement as HTMLDivElement;
+              const updateMarker = (clientX: number) => {
+                const rect = div.getBoundingClientRect();
+                const x = clientX - rect.left;
+                const percent = Math.max(0, Math.min(1, x / rect.width));
+                setMarkerProgress(percent * 100);
+              };
+              updateMarker(e.clientX);
+              const onPointerMove = (moveEvent: PointerEvent) => {
+                moveEvent.preventDefault();
+                updateMarker(moveEvent.clientX);
+              };
+              const onPointerUp = () => {
+                document.removeEventListener('pointermove', onPointerMove);
+                document.removeEventListener('pointerup', onPointerUp);
+              };
+              document.addEventListener('pointermove', onPointerMove);
+              document.addEventListener('pointerup', onPointerUp);
+            }}
+            />
           </div>
 
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
