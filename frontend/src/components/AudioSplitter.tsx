@@ -62,7 +62,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     ws.on('play', () => setIsPlaying(true)); 
     ws.on('pause', () => setIsPlaying(false));
     
-    regions.on('region-clicked', (r: Region, e: MouseEvent) => {
+    regions.on('region-clicked', (r: Region) => {
         setSelectedRegion(r);
     });
 
