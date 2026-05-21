@@ -62,6 +62,13 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
     setLyrics(recording.lyrics || '');
   }, [recording.lyrics]);
 
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [isEditing]);
+
   const audioObjRef = useRef<HTMLAudioElement | null>(null);
   const progressTimerRef = useRef<number | null>(null);
 
@@ -250,9 +257,6 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
   return (
     <div 
       tabIndex={0}
-      onClick={(e) => {
-        e.currentTarget.focus();
-      }}
       onKeyDown={(e) => {
         if (e.key === ' ' || e.code === 'Space') {
           if ((e.target as HTMLElement).tagName === 'INPUT') return;
@@ -574,6 +578,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
           {isEditing ? (
             <div style={{ display: 'flex', gap: '8px' }}>
               <input 
+                ref={inputRef}
                 value={lyrics}
                 onChange={e => setLyrics(e.target.value)}
                 placeholder="輸入羅馬歌詞 (空格分隔)..."
