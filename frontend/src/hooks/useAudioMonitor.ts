@@ -164,17 +164,39 @@ export function useAudioMonitor() {
         setStatus({ text: "讀取檔案中...", color: "blue" });
         
         try {
-            // 先將檔案讀進記憶體轉為 Blob，這樣就能完全脫離 input 元素的生命週期
             const arrayBuffer = await file.arrayBuffer();
             const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
             
             const formData = new FormData();
             formData.append('type', 'raw'); 
-            formData.append('audio', blob, file.name);
+            formData.append('audio', blob, 'upload.wav');
             
-            setStatus({ text: "上傳中...", color: "blue" });
+            setStatus({ text: "上傳中... 0%", color: "blue" });
             
-            await fetch('/upload', { method: 'POST', body: formData });
+            await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload', true);
+                
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const percentComplete = Math.round((e.loaded / e.total) * 100);
+                        setStatus({ text: `上傳中... ${percentComplete}%`, color: "blue" });
+                    }
+                };
+                
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve(xhr.responseText);
+                    } else {
+                        reject(new Error(`Server error: ${xhr.status}`));
+                    }
+                };
+                
+                xhr.onerror = () => reject(new Error("Network Error"));
+                
+                xhr.send(formData);
+            });
+            
             fetchRecordings();
             setStatus({ text: "檔案已上傳", color: "green" });
         } catch (err) {
