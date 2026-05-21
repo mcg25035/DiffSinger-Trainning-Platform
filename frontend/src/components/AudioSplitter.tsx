@@ -63,7 +63,6 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     ws.on('pause', () => setIsPlaying(false));
     
     regions.on('region-clicked', (r: Region, e: MouseEvent) => {
-        e.stopPropagation();
         setSelectedRegion(r);
     });
 
