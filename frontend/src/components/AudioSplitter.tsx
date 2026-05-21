@@ -62,12 +62,16 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     ws.on('play', () => setIsPlaying(true)); 
     ws.on('pause', () => setIsPlaying(false));
     
+    let lastRegionClick = 0;
     regions.on('region-clicked', (r: Region) => {
+        lastRegionClick = Date.now();
         setSelectedRegion(r);
     });
 
     ws.on('interaction', () => {
-        setSelectedRegion(null);
+        if (Date.now() - lastRegionClick > 100) {
+            setSelectedRegion(null);
+        }
     });
 
     regions.on('region-updated', (r: Region) => {
