@@ -584,17 +584,28 @@ export function LabelEditor({ recording, onCancel }: Props) {
             e.preventDefault();
             handleUndo();
         }
+        const active = document.activeElement;
+        const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+
         if (e.code === 'Space') {
-            const active = document.activeElement;
-            const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
             if (!isInput) {
                 e.preventDefault();
                 handleWordPlay();
             }
         }
+        if (e.key === 'p' || e.key === 'P') {
+            if (!isInput) {
+                e.preventDefault();
+                handlePhonemePlay();
+            }
+        }
+        if (e.key === 'f' || e.key === 'F') {
+            if (!isInput) {
+                e.preventDefault();
+                handleFullPlay();
+            }
+        }
         if (e.key === 'Delete') {
-            const active = document.activeElement;
-            const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
             if (!isInput) {
                 e.preventDefault();
                 handleDeleteRegion();
@@ -752,9 +763,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
       lastPlayRequestRef.current = now;
       console.log(`[PLAY-WORD] ${word.word} @ ${word.start}-${word.end}`);
       precisePlayRange(word.start, word.end);
-    } else {
-      // 2. If no Word matches (e.g. cursor is on SP/pau), use Phoneme logic to play that specific segment
-      handlePhonemePlay();
     }
   };
 
