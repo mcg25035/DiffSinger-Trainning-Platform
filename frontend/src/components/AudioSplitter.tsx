@@ -34,12 +34,12 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     if (!regionsRef.current) return;
     const current = regionsRef.current.getRegions()
         .sort((a, b) => a.start - b.start)
-        .map(r => ({ start: r.start, end: r.end, isAdopted: !!(r as any).isAdopted }));
+        .map(r => ({ start: r.start, end: r.end }));
     
     setUndoStack(prev => {
         if (prev.length > 0) {
             const last = prev[prev.length - 1];
-            if (last.length === current.length && last.every((r, i) => Math.abs(r.start - current[i].start) < 0.001 && Math.abs(r.end - current[i].end) < 0.001 && r.isAdopted === current[i].isAdopted)) {
+            if (last.length === current.length && last.every((r, i) => Math.abs(r.start - current[i].start) < 0.001 && Math.abs(r.end - current[i].end) < 0.001)) {
                 return prev;
             }
         }
@@ -66,20 +66,13 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
             regionsRef.current.clearRegions();
             setSelectedRegion(null);
             prevState.forEach((seg, i) => {
-                // @ts-ignore - allow isAdopted usage
-                const reg = regionsRef.current?.addRegion({
+                regionsRef.current?.addRegion({
                     start: seg.start,
                     end: seg.end,
-                    // @ts-ignore
-                    color: seg.isAdopted ? '#000' : (i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'),
+                    color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)',
                     drag: false,
-                    // @ts-ignore
-                    resize: !seg.isAdopted
+                    resize: true
                 });
-                // @ts-ignore
-                if (reg && seg.isAdopted) {
-                    (reg as any).isAdopted = true;
-                }
             });
             isUpdatingRef.current = false;
         }
@@ -125,7 +118,6 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     
     let lastRegionClick = 0;
     regions.on('region-clicked', (r: Region) => {
-        if ((r as any).isAdopted) return;
         lastRegionClick = Date.now();
         setSelectedRegion(r);
     });
@@ -168,10 +160,6 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     if (!regionsRef.current) return;
     const all = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
     all.forEach((r, i) => {
-        if ((r as any).isAdopted) {
-            r.setOptions({ color: '#000' });
-            return;
-        }
         const isSelected = r === selectedRegion;
         r.setOptions({
             color: isSelected ? 'rgba(255, 0, 0, 0.3)' : (i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)')
@@ -256,17 +244,17 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
                 
                 isUpdatingRef.current = true;
 
-                // ALWAYS merge adjacent regions to maintain contiguous boundaries!
-                if (prev) {
-                    prev.setOptions({ end: bEnd });
-                } else if (next) {
-                    next.setOptions({ start: bStart });
+                if (mode === 'auto') {
+                    if (prev) {
+                        prev.setOptions({ end: bEnd });
+                    } else if (next) {
+                        next.setOptions({ start: bStart });
+                    }
                 }
 
                 // Recalculate colors for remaining regions
                 const newAll = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
                 newAll.forEach((r, i) => {
-                    if ((r as any).isAdopted) return;
                     r.setOptions({
                         color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'
                     });
@@ -300,20 +288,22 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
               fd.append('audio', blob, 'segment.wav');
               await fetch('/upload', { method: 'POST', body: fd });
               
-              // Mark as adopted instead of removing to maintain boundary list and obscure waveform visually
-              (reg as any).isAdopted = true;
+              const allRegions = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+              const idx = allRegions.indexOf(reg);
+              const prev = idx > 0 ? allRegions[idx - 1] : null;
+              const next = idx < allRegions.length - 1 ? allRegions[idx + 1] : null;
+              
+              reg.remove();
               setSelectedRegion(null);
               
               isUpdatingRef.current = true;
+              if (mode === 'auto') {
+                  if (prev) prev.setOptions({ end: reg.end });
+                  else if (next) next.setOptions({ start: reg.start });
+              }
               
               const newAll = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
-              newAll.forEach((r, i) => {
-                  if ((r as any).isAdopted) {
-                      r.setOptions({ color: '#000', resize: false });
-                  } else {
-                      r.setOptions({ color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)' });
-                  }
-              });
+              newAll.forEach((r, i) => r.setOptions({ color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)' }));
               isUpdatingRef.current = false;
               saveHistory();
           }
@@ -341,7 +331,6 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         for (let i = 0; i < regs.length; i++) {
             const reg = regs[i];
             if (reg.end - reg.start < 0.05) continue;
-            if ((reg as any).isAdopted) continue;
             
             const slicedBuffer = crunker.sliceAudio(fullBuffer, reg.start, reg.end);
             const { blob } = crunker.export(slicedBuffer, "audio/wav");
