@@ -22,6 +22,8 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
   const blobUrlRef = useRef<string | null>(null);
   const syncAnimRef = useRef<number | null>(null);
   const playbackRateRef = useRef(playbackRate);
+  // 同步追蹤播放狀態，不依賴 React state 的非同步更新
+  const isPlayingRef = useRef(false);
   const [isAudioLoaded, setIsAudioLoaded] = useState(false);
 
   useEffect(() => {
@@ -37,7 +39,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
       setIsAudioLoaded(true);
     });
     return () => {
-      stop();
+      stopInternal(false); // cleanup without notifying UI — component is unmounting
       fullAudioBufferRef.current = null;
     };
   }, [url]);
@@ -49,22 +51,36 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     if ('mozPreservesPitch' in a) a.mozPreservesPitch = true;
   };
 
-  const stop = () => {
+  /**
+   * 內部停止，notifyUI 控制是否通知 React state
+   * 當我們要「停了馬上開始新播放」時，傳 false 避免多餘的 false→true state flip
+   */
+  const stopInternal = (notifyUI: boolean) => {
     if (syncAnimRef.current) {
       cancelAnimationFrame(syncAnimRef.current);
       syncAnimRef.current = null;
     }
     if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = "";
+      // 解除事件，避免舊 audio 的 onpause 在 pause() 後觸發並干擾新播放
+      const old = audioRef.current;
+      old.onplay = null;
+      old.onpause = null;
+      old.onended = null;
+      old.pause();
+      old.src = "";
       audioRef.current = null;
     }
     if (blobUrlRef.current) {
       URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = null;
     }
-    onToggleIsPlaying(false);
+    if (notifyUI) {
+      isPlayingRef.current = false;
+      onToggleIsPlaying(false);
+    }
   };
+
+  const stop = () => stopInternal(true);
 
   const startSyncLoop = (offset: number) => {
     const audio = audioRef.current;
@@ -81,7 +97,8 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
   const playRange = (start: number, end: number) => {
     const fullBuffer = fullAudioBufferRef.current;
     if (!fullBuffer) return;
-    stop();
+    // 停止舊播放但不通知 UI，避免 isPlaying false→true 的閃爍
+    stopInternal(false);
     const CrunkerConstructor = (Crunker as any).default || Crunker;
     const crunker = new CrunkerConstructor();
     const sliceBuffer = crunker.sliceAudio(fullBuffer, start, end);
@@ -94,26 +111,33 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     applyPitchFix(audio);
     audioRef.current = audio;
     audio.onended = () => {
-      if (blobUrlRef.current === blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlRef.current = null; }
       if (audioRef.current === audio) {
+        if (blobUrlRef.current === blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlRef.current = null; }
         audioRef.current = null;
+        isPlayingRef.current = false;
         onToggleIsPlaying(false);
         onTimeUpdate(start);
         if (syncAnimRef.current) cancelAnimationFrame(syncAnimRef.current);
       }
     };
     audio.onplay = () => {
+      if (audioRef.current !== audio) return; // 已被新播放取代，忽略
+      isPlayingRef.current = true;
       onToggleIsPlaying(true);
       applyPitchFix(audio);
       audio.playbackRate = playbackRateRef.current;
       startSyncLoop(start);
     };
-    audio.onpause = () => onToggleIsPlaying(false);
+    audio.onpause = () => {
+      if (audioRef.current !== audio) return;
+      isPlayingRef.current = false;
+      onToggleIsPlaying(false);
+    };
     audio.play();
   };
 
   const playFull = (startTime: number) => {
-    stop();
+    stopInternal(false);
     const audio = new Audio(url);
     applyPitchFix(audio);
     audio.playbackRate = playbackRateRef.current;
@@ -123,18 +147,25 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     audio.onended = () => {
       if (audioRef.current === audio) {
         audioRef.current = null;
+        isPlayingRef.current = false;
         onToggleIsPlaying(false);
-        onTimeUpdate(audio.duration); // Force sync to exact end on finish
+        onTimeUpdate(audio.duration);
         if (syncAnimRef.current) cancelAnimationFrame(syncAnimRef.current);
       }
     };
     audio.onplay = () => {
+      if (audioRef.current !== audio) return;
+      isPlayingRef.current = true;
       onToggleIsPlaying(true);
       applyPitchFix(audio);
       audio.playbackRate = playbackRateRef.current;
       startSyncLoop(0);
     };
-    audio.onpause = () => onToggleIsPlaying(false);
+    audio.onpause = () => {
+      if (audioRef.current !== audio) return;
+      isPlayingRef.current = false;
+      onToggleIsPlaying(false);
+    };
     audio.play();
   };
 
@@ -146,7 +177,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     }
   }, [playbackRate]);
 
-  return { playRange, playFull, stop, isAudioLoaded };
+  return { playRange, playFull, stop, isAudioLoaded, isPlayingRef };
 }
 
 interface Props {
@@ -173,7 +204,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isUpdatingRef = useRef(false);
-  const lastPlayRequestRef = useRef<number>(0);
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -191,12 +221,18 @@ export function LabelEditor({ recording, onCancel }: Props) {
   const [isDirty, setIsDirty] = useState(false);
   const [lyricsCount, setLyricsCount] = useState(0);
 
-  const { playRange, playFull, stop: stopAudio, isAudioLoaded } = usePreciseAudio(
+  const { playRange, playFull, stop: stopAudio, isAudioLoaded, isPlayingRef } = usePreciseAudio(
     recording.url, 
     playbackRate, 
     (t) => wavesurferRef.current?.setTime(t), 
     (p) => setIsPlaying(p)
   );
+
+  // 各個播放動作各自獨立的 debounce timestamp，避免 W→P 連按時互相封鎖
+  const lastPhonemePlayRef = useRef<number>(0);
+  const lastWordPlayRef = useRef<number>(0);
+  const lastFullPlayRef = useRef<number>(0);
+  const PLAY_DEBOUNCE_MS = 150;
 
   const parseLab = (content: string): LabSegment[] => {
     return content.split('\n')
@@ -510,13 +546,15 @@ export function LabelEditor({ recording, onCancel }: Props) {
       const regions = regionsRef.current;
       if (!ws || !regions) return;
 
-      // 使用 WaveSurfer 內建方法獲取精確點擊時間
-      const scrollContainer = containerRef.current!.shadowRoot?.querySelector('.scroll') || containerRef.current!;
-      const rect = scrollContainer.getBoundingClientRect();
+      // 正確計算點擊時間：
+      // - x 必須相對於「整個可視容器」的左邊緣（containerRef 的 rect）
+      // - scrollLeft / scrollWidth 從 WaveSurfer wrapper 取得（Shadow DOM 的捲動容器）
+      const wrapper = ws.getWrapper();
+      const rect = containerRef.current!.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const duration = ws.getDuration();
-      const scrollLeft = scrollContainer.scrollLeft;
-      const scrollWidth = scrollContainer.scrollWidth;
+      const scrollLeft = wrapper.scrollLeft;
+      const scrollWidth = wrapper.scrollWidth;
       const time = ((x + scrollLeft) / scrollWidth) * duration;
 
       console.log(`[CONTEXT-MENU] x:${x}, scrollLeft:${scrollLeft}, scrollWidth:${scrollWidth}, time:${time}`);
@@ -634,7 +672,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
     };
     window.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
-  }, [wordInstances, labelsCount]);
+  }, [wordInstances, labelsCount, isPlayingRef]);
 
   useEffect(() => {
     if (wavesurferRef.current && isLoaded) {
@@ -745,9 +783,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const regions = regionsRef.current;
     if (!ws || !regions) return;
 
+    // 各動作獨立 debounce，不影響其他動作
     const now = Date.now();
-    if (now - lastPlayRequestRef.current < 300) return;
-    lastPlayRequestRef.current = now;
+    if (now - lastPhonemePlayRef.current < PLAY_DEBOUNCE_MS) return;
+    lastPhonemePlayRef.current = now;
 
     const time = ws.getCurrentTime();
     const eps = 0.01;
@@ -755,7 +794,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const all = regions.getRegions().sort((a, b) => a.start - b.start);
     if (all.length === 0) return;
 
-    // Search logic for Phoneme:
     let target = all.find(r => time >= r.start && time < r.end);
     if (!target) target = all.find(r => time >= r.start && time <= r.end);
     if (!target && time < eps) target = all[0];
@@ -771,16 +809,15 @@ export function LabelEditor({ recording, onCancel }: Props) {
     if (!ws) return;
 
     const now = Date.now();
-    if (now - lastPlayRequestRef.current < 300) return;
+    if (now - lastWordPlayRef.current < PLAY_DEBOUNCE_MS) return;
+    lastWordPlayRef.current = now;
 
     const time = ws.getCurrentTime();
     
-    // Search logic for Word:
     let word = wordInstances.find(w => time >= w.start && time < w.end)
             || wordInstances.find(w => time >= w.start && time <= w.end);
               
     if (word) {
-      lastPlayRequestRef.current = now;
       console.log(`[PLAY-WORD] ${word.word} @ ${word.start}-${word.end}`);
       precisePlayRange(word.start, word.end);
     }
@@ -790,13 +827,17 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const ws = wavesurferRef.current;
     if (!ws) return;
 
-    if (isPlaying) {
+    const now = Date.now();
+    if (now - lastFullPlayRef.current < PLAY_DEBOUNCE_MS) return;
+    lastFullPlayRef.current = now;
+
+    // 用 isPlayingRef 而不是 isPlaying state，避免 React 異步更新造成的誤判
+    if (isPlayingRef.current) {
       stopAudio();
       return;
     }
 
     let startTime = ws.getCurrentTime();
-    // If we are at the end (with a small epsilon), restart from the beginning
     if (startTime >= ws.getDuration() - 0.05) {
         startTime = 0;
     }
