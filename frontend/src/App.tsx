@@ -126,7 +126,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
          <h2 style={{ fontSize: '11px', margin: '0 0 16px 0', color: '#888', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase' }}>
            Raw Recordings ({rawRecordings.length})
          </h2>
-         <div style={{ flex: 1, overflowY: 'auto' }}>
+         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
            <RecordingList recordings={rawRecordings} onSplit={onSplit} onLabel={onLabel} onRefresh={onRefresh} />
          </div>
       </div>
@@ -135,7 +135,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
          <h2 style={{ fontSize: '11px', margin: '0 0 16px 0', color: '#00e676', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase' }}>
            Upload Segments ({uploadSegments.length})
          </h2>
-         <div style={{ flex: 1, overflowY: 'auto' }}>
+         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
            <RecordingList recordings={uploadSegments} onLabel={onLabel} onRefresh={onRefresh} phonemeSet={phonemeSet} dictionaryId={selectedDictId} />
          </div>
       </div>

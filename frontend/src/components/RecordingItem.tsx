@@ -257,7 +257,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         e.currentTarget.style.background = '#1a1a1a';
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
           <button 
             onClick={togglePlay}
@@ -321,12 +321,12 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ width: '60px', height: '2px', background: '#222', borderRadius: '2px', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ width: '40px', height: '2px', background: '#222', borderRadius: '2px', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${progress}%`, background: isPlaying ? '#00e676' : '#2979ff' }} />
           </div>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {recording.type === 'segment' && (
               <>
                 <button
@@ -494,7 +494,9 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
                 color: recording.isPending ? '#ffca28' : '#00e676', 
                 opacity: 0.8, 
                 fontStyle: 'italic', 
-                paddingLeft: '28px' 
+                paddingLeft: '28px',
+                lineHeight: '1.4',
+                wordBreak: 'break-word'
             }}>
               {recording.isPending && "⚠️ [AI] "}
               {recording.lyrics}
