@@ -4,16 +4,16 @@ interface Props {
   isRecording: boolean;
   onStart: () => void;
   onStop: () => void;
-  onUploadFile?: (file: File) => void;
+  onUploadFile?: (file: File) => Promise<void>;
   disabled: boolean;
 }
 
 export function RecorderControls({ isRecording, onStart, onStop, onUploadFile, disabled }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0] && onUploadFile) {
-      onUploadFile(e.target.files[0]);
+      await onUploadFile(e.target.files[0]);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
