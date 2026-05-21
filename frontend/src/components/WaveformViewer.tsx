@@ -39,6 +39,10 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
             }
             currentZoom = Math.min(5000, Math.max(10, currentZoom + (e.deltaY > 0 ? -50 : 50)));
             ws.zoom(currentZoom);
+            const time = ws.getCurrentTime();
+            const wrapper = ws.getWrapper();
+            const width = wrapper.clientWidth;
+            wrapper.scrollLeft = (time * currentZoom) - (width / 2);
         }
     };
     containerRef.current.addEventListener('wheel', handleWheel, { passive: false });

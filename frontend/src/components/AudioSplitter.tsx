@@ -23,6 +23,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [mode, setMode] = useState<'auto' | 'manual'>('auto');
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
   const [, setUndoStack] = useState<{start: number, end: number}[][]>([]);
   const saveHistoryTimeout = useRef<number | null>(null);
@@ -139,7 +140,21 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     });
   }, [queueSaveHistory]);
 
-  useEffect(() => { if (isLoaded) runAutoDetect(); }, [isLoaded, runAutoDetect]);
+  const switchToManual = useCallback(() => {
+      const ws = wavesurferRef.current;
+      const regions = regionsRef.current;
+      if (!ws || !regions) return;
+      regions.clearRegions();
+      setSelectedRegion(null);
+      regions.addRegion({ start: 0, end: ws.getDuration(), color: 'rgba(255,255,255,0.08)', drag: false, resize: true });
+      saveHistory();
+  }, [saveHistory]);
+
+  useEffect(() => { 
+      if (!isLoaded) return;
+      if (mode === 'auto') runAutoDetect(); 
+      else switchToManual();
+  }, [isLoaded, runAutoDetect, switchToManual, mode]);
 
   useEffect(() => {
     if (!regionsRef.current) return;
@@ -158,6 +173,16 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
             e.preventDefault();
             handleUndo();
             return;
+        }
+
+        if (e.key === 'Enter') {
+            const active = document.activeElement;
+            const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+            if (!isInput && selectedRegion) {
+                e.preventDefault();
+                handleAdoptCurrent();
+                return;
+            }
         }
 
         if (e.code === 'Space') {
@@ -219,10 +244,12 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
                 
                 isUpdatingRef.current = true;
 
-                if (prev) {
-                    prev.setOptions({ end: bEnd });
-                } else if (next) {
-                    next.setOptions({ start: bStart });
+                if (mode === 'auto') {
+                    if (prev) {
+                        prev.setOptions({ end: bEnd });
+                    } else if (next) {
+                        next.setOptions({ start: bStart });
+                    }
                 }
 
                 // Recalculate colors for remaining regions
@@ -240,7 +267,53 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedRegion, handleUndo, saveHistory]);
+  }, [selectedRegion, handleUndo, saveHistory, mode, isProcessing]);
+
+  const handleAdoptCurrent = async () => {
+      if (!selectedRegion || !regionsRef.current || isProcessing) return;
+      setIsProcessing(true);
+      try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const CrunkerConstructor = (Crunker as any).default || Crunker;
+          const crunker = new CrunkerConstructor();
+          const [fullBuffer] = await crunker.fetchAudio(recording.url);
+          
+          const reg = selectedRegion;
+          if (reg.end - reg.start >= 0.05) {
+              const slicedBuffer = crunker.sliceAudio(fullBuffer, reg.start, reg.end);
+              const { blob } = crunker.export(slicedBuffer, "audio/wav");
+              
+              const fd = new FormData();
+              fd.append('type', 'upload_segments');
+              fd.append('audio', blob, 'segment.wav');
+              await fetch('/upload', { method: 'POST', body: fd });
+              
+              const allRegions = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+              const idx = allRegions.indexOf(reg);
+              const prev = idx > 0 ? allRegions[idx - 1] : null;
+              const next = idx < allRegions.length - 1 ? allRegions[idx + 1] : null;
+              
+              reg.remove();
+              setSelectedRegion(null);
+              
+              isUpdatingRef.current = true;
+              if (mode === 'auto') {
+                  if (prev) prev.setOptions({ end: reg.end });
+                  else if (next) next.setOptions({ start: reg.start });
+              }
+              
+              const newAll = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+              newAll.forEach((r, i) => r.setOptions({ color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)' }));
+              isUpdatingRef.current = false;
+              saveHistory();
+          }
+      } catch (err) {
+          console.error("Adopt Current Error:", err);
+          alert("Processing failed. See console for details.");
+      } finally {
+          setIsProcessing(false);
+      }
+  };
 
   const handleProcess = async () => {
     setIsProcessing(true);
@@ -281,6 +354,10 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
             <h2 style={{ fontSize: '20px', margin: 0, fontWeight: '800', color: '#fff' }}>PRECISION SPLITTER</h2>
+            <div style={{ display: 'flex', background: '#222', borderRadius: '8px', padding: '4px' }}>
+                <button onClick={() => setMode('auto')} style={{ background: mode === 'auto' ? '#00e5ff' : 'transparent', color: mode === 'auto' ? '#000' : '#fff', border: 'none', borderRadius: '4px', padding: '6px 16px', cursor: 'pointer', fontWeight: 'bold' }}>AUTO</button>
+                <button onClick={() => setMode('manual')} style={{ background: mode === 'manual' ? '#00e5ff' : 'transparent', color: mode === 'manual' ? '#000' : '#fff', border: 'none', borderRadius: '4px', padding: '6px 16px', cursor: 'pointer', fontWeight: 'bold' }}>MANUAL</button>
+            </div>
             <button onClick={() => wavesurferRef.current?.playPause()} disabled={!isLoaded} style={{ background: '#222', border: '1px solid #666', color: isPlaying ? '#00e676' : '#fff', borderRadius: '8px', padding: '10px 20px', cursor: 'pointer', fontWeight: 'bold' }}>
                 {isPlaying ? 'PAUSE' : 'PLAY'}
             </button>
@@ -290,6 +367,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
 
       <WaveformViewer url={recording.url} threshold={threshold} onReady={handleWaveformReady} />
 
+      {mode === 'auto' ? (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '24px', alignItems: 'end', padding: '24px', background: '#111', borderRadius: '16px', border: '1px solid #444' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <label style={{ fontSize: '11px', color: '#ccc', fontWeight: '800' }}>THRESHOLD: {threshold}dB</label>
@@ -307,6 +385,23 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
           {isProcessing ? 'SAVING...' : 'ADOPT ALL'}
         </button>
       </div>
+      ) : (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px', background: '#111', borderRadius: '16px', border: '1px solid #444' }}>
+          <div style={{ color: '#ccc', fontSize: '13px', lineHeight: '1.6' }}>
+             <b>MANUAL MODE</b><br/>
+             Press <b style={{color: '#00e5ff'}}>C</b> to split at playhead.<br/>
+             Select a region and click <b style={{color: '#00e5ff'}}>ADOPT SELECTED</b> (or press Enter) to extract it.
+          </div>
+          <div style={{ display: 'flex', gap: '16px' }}>
+              <button onClick={handleAdoptCurrent} disabled={!selectedRegion || isProcessing} style={{ padding: '0 30px', height: '52px', background: selectedRegion ? '#00e5ff' : '#444', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: selectedRegion ? 'pointer' : 'not-allowed' }}>
+                {isProcessing ? 'SAVING...' : 'ADOPT SELECTED'}
+              </button>
+              <button onClick={handleProcess} disabled={isProcessing || !isLoaded} style={{ padding: '0 30px', height: '52px', background: '#fff', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>
+                ADOPT ALL
+              </button>
+          </div>
+      </div>
+      )}
     </div>
   );
 }
