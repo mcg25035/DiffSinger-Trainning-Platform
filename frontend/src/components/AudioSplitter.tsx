@@ -160,6 +160,51 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
             return;
         }
 
+        if (e.code === 'Space') {
+            const active = document.activeElement;
+            const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+            if (!isInput) {
+                e.preventDefault();
+                wavesurferRef.current?.playPause();
+                return;
+            }
+        }
+
+        if (e.key === 'c' || e.key === 'C') {
+            const active = document.activeElement;
+            const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+            if (!isInput && selectedRegion && regionsRef.current && wavesurferRef.current) {
+                e.preventDefault();
+                const time = wavesurferRef.current.getCurrentTime();
+                if (time > selectedRegion.start + 0.01 && time < selectedRegion.end - 0.01) {
+                    const oldEnd = selectedRegion.end;
+                    
+                    isUpdatingRef.current = true;
+                    
+                    selectedRegion.setOptions({ end: time });
+                    
+                    regionsRef.current.addRegion({
+                        start: time,
+                        end: oldEnd,
+                        drag: false,
+                        resize: true
+                    });
+                    
+                    const newAll = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+                    newAll.forEach((r, i) => {
+                        const isSelected = r === selectedRegion;
+                        r.setOptions({
+                            color: isSelected ? 'rgba(255, 0, 0, 0.3)' : (i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)')
+                        });
+                    });
+                    
+                    isUpdatingRef.current = false;
+                    saveHistory();
+                }
+                return;
+            }
+        }
+
         if (e.key === 'Delete' || e.key === 'Backspace') {
             if (selectedRegion && regionsRef.current) {
                 const allRegions = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
