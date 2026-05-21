@@ -22,11 +22,18 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
   const blobUrlRef = useRef<string | null>(null);
   const syncAnimRef = useRef<number | null>(null);
   const playbackRateRef = useRef(playbackRate);
-  // 播放 session 計數器：每次啟動新播放就 +1，所有非同步回調都用它判斷自己是否過期
   const sessionRef = useRef(0);
-  // 同步播放狀態（不依賴 React 非同步 state）
   const isPlayingRef = useRef(false);
   const [isAudioLoaded, setIsAudioLoaded] = useState(false);
+
+  // 集中管理狀態切換，加上 log
+  const setPlaying = (value: boolean, reason: string) => {
+    const prev = isPlayingRef.current;
+    if (prev === value) return; // 不重複設定
+    isPlayingRef.current = value;
+    onToggleIsPlaying(value);
+    console.log(`[AUDIO-DBG] setPlaying: ${prev} → ${value} (${reason}) session=${sessionRef.current}`);
+  };
 
   useEffect(() => {
     playbackRateRef.current = playbackRate;
@@ -41,7 +48,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
       setIsAudioLoaded(true);
     });
     return () => {
-      killSession();
+      killSession('unmount');
       fullAudioBufferRef.current = null;
     };
   }, [url]);
@@ -53,13 +60,10 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     if ('mozPreservesPitch' in a) a.mozPreservesPitch = true;
   };
 
-  /**
-   * 無條件殺死當前播放 session。
-   * 把 audio 的所有事件清除後再 pause，確保不會有殘留回調。
-   */
-  const killSession = () => {
-    // 讓所有舊的非同步回調失效
+  const killSession = (reason: string) => {
+    const oldSession = sessionRef.current;
     sessionRef.current++;
+    console.log(`[AUDIO-DBG] killSession(${reason}): session ${oldSession} → ${sessionRef.current}, wasPlaying=${isPlayingRef.current}`);
 
     if (syncAnimRef.current) {
       cancelAnimationFrame(syncAnimRef.current);
@@ -72,44 +76,64 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
       old.onended = null;
       try { old.pause(); } catch (_) { /* ignore */ }
       old.removeAttribute('src');
-      old.load(); // 釋放資源
+      old.load();
       audioRef.current = null;
     }
     if (blobUrlRef.current) {
       URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = null;
     }
-    isPlayingRef.current = false;
-    onToggleIsPlaying(false);
+    setPlaying(false, `killSession(${reason})`);
   };
 
-  const stop = () => killSession();
+  const stop = () => killSession('user-stop');
 
   const startSyncLoop = (mySession: number, offset: number) => {
     const tick = () => {
-      // session 不一致 → 這個 loop 已過期，自動退出
-      if (sessionRef.current !== mySession) return;
-      const audio = audioRef.current;
-      if (audio && !audio.paused && !audio.ended) {
-        onTimeUpdate(offset + audio.currentTime);
-        syncAnimRef.current = requestAnimationFrame(tick);
+      if (sessionRef.current !== mySession) {
+        console.log(`[AUDIO-DBG] syncLoop exit: stale session (mine=${mySession}, current=${sessionRef.current})`);
+        return;
       }
+      const audio = audioRef.current;
+      if (!audio || audio.paused || audio.ended) {
+        console.log(`[AUDIO-DBG] syncLoop exit: audio gone/paused/ended, session=${mySession}`);
+        return;
+      }
+      try {
+        const t = offset + audio.currentTime;
+        if (isFinite(t)) {
+          onTimeUpdate(t);
+        }
+      } catch (err) {
+        console.error(`[AUDIO-DBG] syncLoop error in onTimeUpdate:`, err);
+      }
+      syncAnimRef.current = requestAnimationFrame(tick);
     };
     syncAnimRef.current = requestAnimationFrame(tick);
   };
 
   const playRange = (start: number, end: number) => {
     const fullBuffer = fullAudioBufferRef.current;
-    if (!fullBuffer) return;
+    if (!fullBuffer) {
+      console.warn(`[AUDIO-DBG] playRange: no buffer loaded`);
+      return;
+    }
 
-    // 殺死舊 session，取得新 session ID
-    killSession();
+    killSession('playRange');
     const mySession = sessionRef.current;
+    console.log(`[AUDIO-DBG] playRange start=${start.toFixed(3)} end=${end.toFixed(3)} session=${mySession}`);
 
-    const CrunkerConstructor = (Crunker as any).default || Crunker;
-    const crunker = new CrunkerConstructor();
-    const sliceBuffer = crunker.sliceAudio(fullBuffer, start, end);
-    const { blob } = crunker.export(sliceBuffer, "audio/wav");
+    let sliceBuffer, blob;
+    try {
+      const CrunkerConstructor = (Crunker as any).default || Crunker;
+      const crunker = new CrunkerConstructor();
+      sliceBuffer = crunker.sliceAudio(fullBuffer, start, end);
+      ({ blob } = crunker.export(sliceBuffer, "audio/wav"));
+    } catch (err) {
+      console.error(`[AUDIO-DBG] playRange Crunker error:`, err);
+      return;
+    }
+
     const blobUrl = URL.createObjectURL(blob);
     blobUrlRef.current = blobUrl;
 
@@ -120,42 +144,43 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     audioRef.current = audio;
 
     audio.onended = () => {
-      if (sessionRef.current !== mySession) return;
+      if (sessionRef.current !== mySession) {
+        console.log(`[AUDIO-DBG] onended IGNORED: stale session (mine=${mySession}, current=${sessionRef.current})`);
+        return;
+      }
+      console.log(`[AUDIO-DBG] onended: session=${mySession}`);
       if (blobUrlRef.current === blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlRef.current = null; }
       audioRef.current = null;
-      isPlayingRef.current = false;
-      onToggleIsPlaying(false);
-      onTimeUpdate(start);
       if (syncAnimRef.current) { cancelAnimationFrame(syncAnimRef.current); syncAnimRef.current = null; }
+      setPlaying(false, 'onended');
+      try { onTimeUpdate(start); } catch (_) {}
     };
+
     audio.onplay = () => {
-      if (sessionRef.current !== mySession) return;
-      isPlayingRef.current = true;
-      onToggleIsPlaying(true);
+      if (sessionRef.current !== mySession) {
+        console.log(`[AUDIO-DBG] onplay IGNORED: stale session (mine=${mySession}, current=${sessionRef.current})`);
+        return;
+      }
+      console.log(`[AUDIO-DBG] onplay: session=${mySession}`);
+      setPlaying(true, 'onplay');
       applyPitchFix(audio);
       audio.playbackRate = playbackRateRef.current;
       startSyncLoop(mySession, start);
     };
-    audio.onpause = () => {
-      if (sessionRef.current !== mySession) return;
-      // onended 之前會先觸發 onpause，但 onended 會自己處理，所以這裡只處理「被外部暫停」的情況
-      // 如果 audio 已經 ended，不要覆蓋 onended 的邏輯
-      if (!audio.ended) {
-        isPlayingRef.current = false;
-        onToggleIsPlaying(false);
-      }
-    };
 
-    // audio.play() 是非同步的，如果在 play resolve 前就被 killSession 了，
-    // Promise 會 reject（AbortError），我們要安全地吃掉這個錯誤
-    audio.play().catch(() => {
-      // 被中斷是正常操作（使用者快速切換），不需要處理
+    // 不設定 onpause — killSession 已經處理所有暫停邏輯
+    // onpause 在 onended 前觸發會造成 race condition
+    audio.onpause = null;
+
+    audio.play().catch((err) => {
+      console.log(`[AUDIO-DBG] playRange audio.play() rejected: session=${mySession}, err=${err?.name}`);
     });
   };
 
   const playFull = (startTime: number) => {
-    killSession();
+    killSession('playFull');
     const mySession = sessionRef.current;
+    console.log(`[AUDIO-DBG] playFull startTime=${startTime.toFixed(3)} session=${mySession}`);
 
     const audio = new Audio(url);
     applyPitchFix(audio);
@@ -165,30 +190,34 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     audioRef.current = audio;
 
     audio.onended = () => {
-      if (sessionRef.current !== mySession) return;
+      if (sessionRef.current !== mySession) {
+        console.log(`[AUDIO-DBG] onended IGNORED: stale session (mine=${mySession}, current=${sessionRef.current})`);
+        return;
+      }
+      console.log(`[AUDIO-DBG] onended (full): session=${mySession}`);
       audioRef.current = null;
-      isPlayingRef.current = false;
-      onToggleIsPlaying(false);
-      onTimeUpdate(audio.duration);
       if (syncAnimRef.current) { cancelAnimationFrame(syncAnimRef.current); syncAnimRef.current = null; }
+      setPlaying(false, 'onended-full');
+      try { onTimeUpdate(audio.duration); } catch (_) {}
     };
+
     audio.onplay = () => {
-      if (sessionRef.current !== mySession) return;
-      isPlayingRef.current = true;
-      onToggleIsPlaying(true);
+      if (sessionRef.current !== mySession) {
+        console.log(`[AUDIO-DBG] onplay IGNORED: stale session (mine=${mySession}, current=${sessionRef.current})`);
+        return;
+      }
+      console.log(`[AUDIO-DBG] onplay (full): session=${mySession}`);
+      setPlaying(true, 'onplay-full');
       applyPitchFix(audio);
       audio.playbackRate = playbackRateRef.current;
       startSyncLoop(mySession, 0);
     };
-    audio.onpause = () => {
-      if (sessionRef.current !== mySession) return;
-      if (!audio.ended) {
-        isPlayingRef.current = false;
-        onToggleIsPlaying(false);
-      }
-    };
 
-    audio.play().catch(() => {});
+    audio.onpause = null;
+
+    audio.play().catch((err) => {
+      console.log(`[AUDIO-DBG] playFull audio.play() rejected: session=${mySession}, err=${err?.name}`);
+    });
   };
 
   useEffect(() => {
@@ -655,6 +684,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
                 if (active instanceof HTMLElement) {
                     active.blur();
                 }
+                console.log('[KEY-DBG] Space pressed - stopAudio()');
                 stopAudio();
             }
         }
@@ -662,6 +692,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
             if (!isInput) {
                 e.preventDefault();
                 e.stopPropagation();
+                console.log('[KEY-DBG] W pressed - handleWordPlay()');
                 handleWordPlay();
             }
         }
@@ -669,6 +700,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
             if (!isInput) {
                 e.preventDefault();
                 e.stopPropagation();
+                console.log('[KEY-DBG] P pressed - handlePhonemePlay()');
                 handlePhonemePlay();
             }
         }
@@ -676,6 +708,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
             if (!isInput) {
                 e.preventDefault();
                 e.stopPropagation();
+                console.log('[KEY-DBG] F pressed - handleFullPlay()');
                 handleFullPlay();
             }
         }
