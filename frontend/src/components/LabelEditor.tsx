@@ -511,11 +511,12 @@ export function LabelEditor({ recording, onCancel }: Props) {
       if (!ws || !regions) return;
 
       // 使用 WaveSurfer 內建方法獲取精確點擊時間
-      const rect = containerRef.current!.getBoundingClientRect();
+      const scrollContainer = containerRef.current!.shadowRoot?.querySelector('.scroll') || containerRef.current!;
+      const rect = scrollContainer.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const duration = ws.getDuration();
-      const scrollLeft = ws.getWrapper().scrollLeft;
-      const scrollWidth = ws.getWrapper().scrollWidth;
+      const scrollLeft = scrollContainer.scrollLeft;
+      const scrollWidth = scrollContainer.scrollWidth;
       const time = ((x + scrollLeft) / scrollWidth) * duration;
 
       console.log(`[CONTEXT-MENU] x:${x}, scrollLeft:${scrollLeft}, scrollWidth:${scrollWidth}, time:${time}`);
