@@ -24,8 +24,8 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
-  const [undoStack, setUndoStack] = useState<{start: number, end: number}[][]>([]);
-  const saveHistoryTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [, setUndoStack] = useState<{start: number, end: number}[][]>([]);
+  const saveHistoryTimeout = useRef<number | null>(null);
 
   const { calculateSplitPoints } = useSplitterLogic();
 
