@@ -160,10 +160,26 @@ export function useAudioMonitor() {
         setStatus({ text: "錄音已上傳", color: "green" });
     };
 
+    const uploadFile = async (file: File) => {
+        const formData = new FormData();
+        formData.append('type', 'raw'); 
+        formData.append('audio', file);
+        
+        setStatus({ text: "上傳中...", color: "blue" });
+        try {
+            await fetch('/upload', { method: 'POST', body: formData });
+            fetchRecordings();
+            setStatus({ text: "檔案已上傳", color: "green" });
+        } catch (err) {
+            console.error("Upload Error:", err);
+            setStatus({ text: "上傳失敗", color: "red" });
+        }
+    };
+
     return {
         devices, selectedDeviceId, setSelectedDeviceId,
         analyser,
-        status, isRecording, startRecording, stopAndUploadRecording,
+        status, isRecording, startRecording, stopAndUploadRecording, uploadFile,
         rawRecordings, uploadSegments,
         refreshRecordings: fetchRecordings,
         refreshDevices: getDevices

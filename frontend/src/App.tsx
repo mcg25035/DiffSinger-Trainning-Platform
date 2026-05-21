@@ -153,6 +153,7 @@ function App() {
     isRecording,
     startRecording,
     stopAndUploadRecording,
+    uploadFile,
     rawRecordings,
     uploadSegments,
     refreshRecordings,
@@ -240,6 +241,7 @@ function App() {
                 isRecording={isRecording}
                 onStart={startRecording}
                 onStop={stopAndUploadRecording}
+                onUploadFile={uploadFile}
                 disabled={!selectedDeviceId}
               />
             </div>
