@@ -23,6 +23,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
 
   const { calculateSplitPoints } = useSplitterLogic();
 
@@ -45,6 +46,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
 
     const points = calculateSplitPoints(dbValues, sr, buffer.duration, threshold, minGap, maxLen);
     regions.clearRegions();
+    setSelectedRegion(null);
     let cur = 0;
     points.forEach((p, i) => {
         if (p <= cur + 0.01) return;
@@ -59,6 +61,16 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     setIsLoaded(true);
     ws.on('play', () => setIsPlaying(true)); 
     ws.on('pause', () => setIsPlaying(false));
+    
+    regions.on('region-clicked', (r: Region, e: MouseEvent) => {
+        e.stopPropagation();
+        setSelectedRegion(r);
+    });
+
+    ws.on('interaction', () => {
+        setSelectedRegion(null);
+    });
+
     regions.on('region-updated', (r: Region) => {
         if (isUpdatingRef.current) return;
         isUpdatingRef.current = true;
@@ -71,6 +83,38 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
   }, []);
 
   useEffect(() => { if (isLoaded) runAutoDetect(); }, [isLoaded, runAutoDetect]);
+
+  useEffect(() => {
+    if (!regionsRef.current) return;
+    const all = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+    all.forEach((r, i) => {
+        const isSelected = r === selectedRegion;
+        r.setOptions({
+            color: isSelected ? 'rgba(255, 0, 0, 0.3)' : (i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)')
+        });
+    });
+  }, [selectedRegion]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+            if (selectedRegion && regionsRef.current) {
+                selectedRegion.remove();
+                setSelectedRegion(null);
+                
+                // Recalculate colors for remaining regions
+                const all = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+                all.forEach((r, i) => {
+                    r.setOptions({
+                        color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'
+                    });
+                });
+            }
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedRegion]);
 
   const handleProcess = async () => {
     setIsProcessing(true);

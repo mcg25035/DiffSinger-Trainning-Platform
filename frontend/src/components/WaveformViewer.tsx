@@ -20,7 +20,6 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
       waveColor: '#00e5ff', 
       progressColor: '#00e5ff',
       cursorColor: '#fff',
-      barWidth: 2,
       height: 160,
       normalize: true, 
       // Removed backend: 'WebAudio' to use default more stable rendering in v7

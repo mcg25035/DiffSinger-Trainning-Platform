@@ -455,7 +455,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
       waveColor: '#00e5ff',
       progressColor: 'rgba(0, 229, 255, 0.15)',
       cursorColor: '#fff',
-      barWidth: 2,
       height: 120,
       normalize: true,
       minPxPerSec: zoomLevel,
