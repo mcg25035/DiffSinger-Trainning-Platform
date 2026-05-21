@@ -161,26 +161,28 @@ export function useAudioMonitor() {
     };
 
     const uploadFile = async (file: File) => {
-        setStatus({ text: "讀取檔案中...", color: "blue" });
+        const sizeMb = (file.size / 1024 / 1024).toFixed(2);
+        setStatus({ text: `準備上傳... (${sizeMb}MB)`, color: "blue" });
         
         try {
-            const arrayBuffer = await file.arrayBuffer();
-            const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
-            
             const formData = new FormData();
             formData.append('type', 'raw'); 
-            formData.append('audio', blob, 'upload.wav');
+            formData.append('audio', file);
             
-            setStatus({ text: "上傳中... 0%", color: "blue" });
+            setStatus({ text: "建立連線中... 0%", color: "blue" });
             
             await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', '/upload', true);
                 
+                // 設定一個超時時間 (例如 5 分鐘)
+                xhr.timeout = 300000;
+                
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable) {
                         const percentComplete = Math.round((e.loaded / e.total) * 100);
-                        setStatus({ text: `上傳中... ${percentComplete}%`, color: "blue" });
+                        const loadedMb = (e.loaded / 1024 / 1024).toFixed(2);
+                        setStatus({ text: `上傳中... ${percentComplete}% (${loadedMb}/${sizeMb}MB)`, color: "blue" });
                     }
                 };
                 
@@ -188,20 +190,22 @@ export function useAudioMonitor() {
                     if (xhr.status >= 200 && xhr.status < 300) {
                         resolve(xhr.responseText);
                     } else {
-                        reject(new Error(`Server error: ${xhr.status}`));
+                        reject(new Error(`伺服器拒絕 (HTTP ${xhr.status})`));
                     }
                 };
                 
-                xhr.onerror = () => reject(new Error("Network Error"));
+                xhr.onerror = () => reject(new Error("網路錯誤或被擋"));
+                xhr.onabort = () => reject(new Error("被瀏覽器中斷"));
+                xhr.ontimeout = () => reject(new Error("連線逾時"));
                 
                 xhr.send(formData);
             });
             
             fetchRecordings();
-            setStatus({ text: "檔案已上傳", color: "green" });
-        } catch (err) {
+            setStatus({ text: "✅ 檔案已上傳", color: "green" });
+        } catch (err: any) {
             console.error("Upload Error:", err);
-            setStatus({ text: "上傳失敗", color: "red" });
+            setStatus({ text: `❌ 失敗: ${err.message}`, color: "red" });
         }
     };
 
