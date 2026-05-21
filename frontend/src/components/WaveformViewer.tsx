@@ -21,7 +21,7 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
       progressColor: '#00e5ff',
       cursorColor: '#fff',
       height: 160,
-      normalize: true, 
+      // Removed normalize: true because it causes zoom bug with multiple canvases in v7
       // Removed backend: 'WebAudio' to use default more stable rendering in v7
     });
     
@@ -71,9 +71,9 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
   }, [url, onReady]); 
 
   // Calculate percentage distance from center (0-50%)
-  // If normalized, maxAmplitude visually represents the top/bottom edges (50%)
+  // Since we removed normalize, maxAmplitude is absolute (1.0 = 50%)
   const currentAmp = Math.pow(10, threshold / 20);
-  const offset = Math.min(50, (currentAmp / maxAmplitude) * 50);
+  const offset = Math.min(50, currentAmp * 50);
 
   return (
     <div style={{ background: '#000', borderRadius: '12px', border: '1px solid #666', padding: '16px 16px 40px 16px', minHeight: '220px', overflow: 'hidden', position: 'relative' }}>
