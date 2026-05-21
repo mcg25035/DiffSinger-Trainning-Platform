@@ -165,9 +165,32 @@ export function useAudioMonitor() {
         formData.append('type', 'raw'); 
         formData.append('audio', file);
         
-        setStatus({ text: "上傳中...", color: "blue" });
+        setStatus({ text: "上傳中... 0%", color: "blue" });
+        
         try {
-            await fetch('/upload', { method: 'POST', body: formData });
+            await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload', true);
+                
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const percentComplete = Math.round((e.loaded / e.total) * 100);
+                        setStatus({ text: `上傳中... ${percentComplete}%`, color: "blue" });
+                    }
+                };
+                
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve(xhr.responseText);
+                    } else {
+                        reject(new Error(`Upload failed with status ${xhr.status}`));
+                    }
+                };
+                
+                xhr.onerror = () => reject(new Error("Network Error"));
+                
+                xhr.send(formData);
+            });
             fetchRecordings();
             setStatus({ text: "檔案已上傳", color: "green" });
         } catch (err) {
