@@ -249,6 +249,17 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
 
   return (
     <div 
+      tabIndex={0}
+      onClick={(e) => {
+        e.currentTarget.focus();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === ' ' || e.code === 'Space') {
+          if ((e.target as HTMLElement).tagName === 'INPUT') return;
+          e.preventDefault();
+          togglePlay(e as any);
+        }
+      }}
       style={{ 
         display: 'flex', 
         flexDirection: 'column',
@@ -258,14 +269,25 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         border: '1px solid #333',
         transition: 'all 0.2s',
         marginBottom: '10px',
-        cursor: 'default'
+        cursor: 'default',
+        outline: 'none'
+      }}
+      onFocus={e => {
+        e.currentTarget.style.borderColor = '#777';
+      }}
+      onBlur={e => {
+        e.currentTarget.style.borderColor = '#333';
       }}
       onMouseOver={e => {
-        e.currentTarget.style.borderColor = '#555';
+        if (document.activeElement !== e.currentTarget) {
+          e.currentTarget.style.borderColor = '#555';
+        }
         e.currentTarget.style.background = '#222';
       }}
       onMouseOut={e => {
-        e.currentTarget.style.borderColor = '#333';
+        if (document.activeElement !== e.currentTarget) {
+          e.currentTarget.style.borderColor = '#333';
+        }
         e.currentTarget.style.background = '#1a1a1a';
       }}
     >
