@@ -590,30 +590,44 @@ export function LabelEditor({ recording, onCancel }: Props) {
         if (e.code === 'Space') {
             if (!isInput) {
                 e.preventDefault();
+                e.stopPropagation();
+                if (active instanceof HTMLElement) {
+                    active.blur();
+                }
+                stopAudio();
+            }
+        }
+        if (e.key === 'w' || e.key === 'W') {
+            if (!isInput) {
+                e.preventDefault();
+                e.stopPropagation();
                 handleWordPlay();
             }
         }
         if (e.key === 'p' || e.key === 'P') {
             if (!isInput) {
                 e.preventDefault();
+                e.stopPropagation();
                 handlePhonemePlay();
             }
         }
         if (e.key === 'f' || e.key === 'F') {
             if (!isInput) {
                 e.preventDefault();
+                e.stopPropagation();
                 handleFullPlay();
             }
         }
         if (e.key === 'Delete') {
             if (!isInput) {
                 e.preventDefault();
+                e.stopPropagation();
                 handleDeleteRegion();
             }
         }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [wordInstances, labelsCount]);
 
   useEffect(() => {
