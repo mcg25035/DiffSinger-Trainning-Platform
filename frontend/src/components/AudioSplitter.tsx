@@ -13,10 +13,16 @@ interface Props {
   onCancel: () => void;
 }
 
+interface StateRegion {
+    start: number;
+    end: number;
+}
+
 export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const isUpdatingRef = useRef(false);
+  
   const [threshold, setThreshold] = useState<number>(-45);
   const [minGap, setMinGap] = useState<number>(0.25);
   const [maxLen, setMaxLen] = useState<number>(10);
@@ -25,27 +31,140 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
-  const [, setUndoStack] = useState<{start: number, end: number}[][]>([]);
+  const [, setUndoStack] = useState<StateRegion[][]>([]);
   const saveHistoryTimeout = useRef<number | null>(null);
+
+  const [adoptedRegions, setAdoptedRegions] = useState<StateRegion[]>([]);
+  const [manualRegions, setManualRegions] = useState<StateRegion[]>([]);
+  const [originalBuffer, setOriginalBuffer] = useState<AudioBuffer | null>(null);
+  const [displayUrl, setDisplayUrl] = useState<string | null>(null);
+  const [isStateLoaded, setIsStateLoaded] = useState(false);
+  
+  // @ts-ignore
+  const [audioContext] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)());
 
   const { calculateSplitPoints } = useSplitterLogic();
 
+  useEffect(() => {
+      let active = true;
+      const init = async () => {
+          try {
+              const res = await fetch(`/api/recordings/${recording.filename}/state`);
+              let state = { adoptedRegions: [], manualRegions: [] };
+              if (res.ok) state = await res.json();
+              
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const CrunkerConstructor = (Crunker as any).default || Crunker;
+              const crunker = new CrunkerConstructor();
+              const [buffer] = await crunker.fetchAudio(recording.url);
+              
+              if (!active) return;
+              setOriginalBuffer(buffer);
+              setAdoptedRegions(state.adoptedRegions || []);
+              setManualRegions(state.manualRegions || []);
+              setIsStateLoaded(true);
+          } catch (err) {
+              console.error("Failed to init state/buffer", err);
+          }
+      };
+      init();
+      return () => { active = false; };
+  }, [recording]);
+
+  useEffect(() => {
+      if (!originalBuffer) return;
+      
+      const sortedAdopted = [...adoptedRegions].sort((a, b) => a.start - b.start);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const CrunkerConstructor = (Crunker as any).default || Crunker;
+      const crunker = new CrunkerConstructor();
+      
+      let buffersToConcat: AudioBuffer[] = [];
+      let currentStart = 0;
+      
+      for (const reg of sortedAdopted) {
+          if (reg.start > currentStart) {
+              buffersToConcat.push(crunker.sliceAudio(originalBuffer, currentStart, reg.start));
+          }
+          currentStart = Math.max(currentStart, reg.end);
+      }
+      
+      if (currentStart < originalBuffer.duration) {
+          buffersToConcat.push(crunker.sliceAudio(originalBuffer, currentStart, originalBuffer.duration));
+      }
+      
+      let finalBuffer: AudioBuffer;
+      if (buffersToConcat.length === 0) {
+          finalBuffer = audioContext.createBuffer(1, 1, originalBuffer.sampleRate);
+      } else if (buffersToConcat.length === 1) {
+          finalBuffer = buffersToConcat[0];
+      } else {
+          finalBuffer = crunker.concatAudio(buffersToConcat);
+      }
+      
+      const { blob } = crunker.export(finalBuffer, "audio/wav");
+      const url = URL.createObjectURL(blob);
+      setDisplayUrl(url);
+      
+      return () => URL.revokeObjectURL(url);
+  }, [originalBuffer, adoptedRegions, audioContext]);
+
+  const visualToOriginalTime = useCallback((visualTime: number) => {
+      let originalTime = visualTime;
+      const sorted = [...adoptedRegions].sort((a, b) => a.start - b.start);
+      for (const reg of sorted) {
+          if (originalTime >= reg.start) {
+              originalTime += (reg.end - reg.start);
+          }
+      }
+      return originalTime;
+  }, [adoptedRegions]);
+
+  const originalToVisualTime = useCallback((originalTime: number) => {
+      let visualTime = originalTime;
+      const sorted = [...adoptedRegions].sort((a, b) => a.start - b.start);
+      for (const reg of sorted) {
+          if (originalTime >= reg.end) {
+              visualTime -= (reg.end - reg.start);
+          } else if (originalTime > reg.start && originalTime < reg.end) {
+              // Should not happen for active regions, but map to boundary
+              visualTime -= (originalTime - reg.start);
+          }
+      }
+      return Math.max(0, visualTime);
+  }, [adoptedRegions]);
+
   const saveHistory = useCallback(() => {
     if (!regionsRef.current) return;
-    const current = regionsRef.current.getRegions()
-        .sort((a, b) => a.start - b.start)
-        .map(r => ({ start: r.start, end: r.end, isAdopted: !!(r as any).isAdopted }));
+    const currentVis = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+    
+    const mapped = currentVis.map(r => ({
+        start: visualToOriginalTime(r.start),
+        end: visualToOriginalTime(r.end)
+    }));
+    
+    setManualRegions(mapped);
     
     setUndoStack(prev => {
         if (prev.length > 0) {
             const last = prev[prev.length - 1];
-            if (last.length === current.length && last.every((r, i) => Math.abs(r.start - current[i].start) < 0.001 && Math.abs(r.end - current[i].end) < 0.001 && r.isAdopted === current[i].isAdopted)) {
+            if (last.length === mapped.length && last.every((r, i) => Math.abs(r.start - mapped[i].start) < 0.001 && Math.abs(r.end - mapped[i].end) < 0.001)) {
                 return prev;
             }
         }
-        return [...prev, current];
+        return [...prev, mapped];
     });
-  }, []);
+
+    fetch(`/api/recordings/${recording.filename}/state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            adoptedRegions,
+            manualRegions: mapped
+        })
+    }).catch(err => console.error("Save state error:", err));
+
+  }, [visualToOriginalTime, adoptedRegions, recording.filename]);
 
   const queueSaveHistory = useCallback(() => {
       if (saveHistoryTimeout.current) clearTimeout(saveHistoryTimeout.current);
@@ -66,26 +185,29 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
             regionsRef.current.clearRegions();
             setSelectedRegion(null);
             prevState.forEach((seg, i) => {
-                // @ts-ignore - allow isAdopted usage
-                const reg = regionsRef.current?.addRegion({
-                    start: seg.start,
-                    end: seg.end,
-                    // @ts-ignore
-                    color: seg.isAdopted ? '#000' : (i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'),
+                const vStart = originalToVisualTime(seg.start);
+                const vEnd = originalToVisualTime(seg.end);
+                regionsRef.current?.addRegion({
+                    start: vStart,
+                    end: vEnd,
+                    color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)',
                     drag: false,
-                    // @ts-ignore
-                    resize: !seg.isAdopted
+                    resize: true
                 });
-                // @ts-ignore
-                if (reg && seg.isAdopted) {
-                    (reg as any).isAdopted = true;
-                }
             });
             isUpdatingRef.current = false;
         }
+        setManualRegions(prevState);
+        
+        fetch(`/api/recordings/${recording.filename}/state`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adoptedRegions, manualRegions: prevState })
+        });
+        
         return newStack;
     });
-  }, []);
+  }, [originalToVisualTime, adoptedRegions, recording.filename]);
 
   const runAutoDetect = useCallback(() => {
     const ws = wavesurferRef.current;
@@ -125,7 +247,6 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     
     let lastRegionClick = 0;
     regions.on('region-clicked', (r: Region) => {
-        if ((r as any).isAdopted) return;
         lastRegionClick = Date.now();
         setSelectedRegion(r);
     });
@@ -146,32 +267,38 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         isUpdatingRef.current = false;
         queueSaveHistory();
     });
-  }, [queueSaveHistory]);
+    
+    // Initialize regions
+    regions.clearRegions();
+    setSelectedRegion(null);
+    
+    if (manualRegions.length > 0) {
+        manualRegions.forEach((reg, i) => {
+            const vStart = originalToVisualTime(reg.start);
+            const vEnd = originalToVisualTime(reg.end);
+            regions.addRegion({
+                start: vStart,
+                end: vEnd,
+                color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)',
+                drag: false,
+                resize: true
+            });
+        });
+    } else {
+        regions.addRegion({ start: 0, end: ws.getDuration(), color: 'rgba(255,255,255,0.08)', drag: false, resize: true });
+    }
 
-  const switchToManual = useCallback(() => {
-      const ws = wavesurferRef.current;
-      const regions = regionsRef.current;
-      if (!ws || !regions) return;
-      regions.clearRegions();
-      setSelectedRegion(null);
-      regions.addRegion({ start: 0, end: ws.getDuration(), color: 'rgba(255,255,255,0.08)', drag: false, resize: true });
-      saveHistory();
-  }, [saveHistory]);
+  }, [queueSaveHistory, manualRegions, originalToVisualTime]);
 
   useEffect(() => { 
       if (!isLoaded) return;
       if (mode === 'auto') runAutoDetect(); 
-      else switchToManual();
-  }, [isLoaded, runAutoDetect, switchToManual, mode]);
+  }, [isLoaded, runAutoDetect, mode]);
 
   useEffect(() => {
     if (!regionsRef.current) return;
     const all = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
     all.forEach((r, i) => {
-        if ((r as any).isAdopted) {
-            r.setOptions({ color: '#000' });
-            return;
-        }
         const isSelected = r === selectedRegion;
         r.setOptions({
             color: isSelected ? 'rgba(255, 0, 0, 0.3)' : (i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)')
@@ -256,17 +383,14 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
                 
                 isUpdatingRef.current = true;
 
-                // ALWAYS merge adjacent regions to maintain contiguous boundaries!
                 if (prev) {
                     prev.setOptions({ end: bEnd });
                 } else if (next) {
                     next.setOptions({ start: bStart });
                 }
 
-                // Recalculate colors for remaining regions
                 const newAll = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
                 newAll.forEach((r, i) => {
-                    if ((r as any).isAdopted) return;
                     r.setOptions({
                         color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)'
                     });
@@ -279,20 +403,25 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedRegion, handleUndo, saveHistory, mode, isProcessing]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRegion, handleUndo, saveHistory, mode, isProcessing, adoptedRegions, manualRegions]);
 
   const handleAdoptCurrent = async () => {
-      if (!selectedRegion || !regionsRef.current || isProcessing) return;
+      if (!selectedRegion || !regionsRef.current || !originalBuffer || isProcessing) return;
       setIsProcessing(true);
       try {
+          const vStart = selectedRegion.start;
+          const vEnd = selectedRegion.end;
+          
+          const oStart = visualToOriginalTime(vStart);
+          const oEnd = visualToOriginalTime(vEnd);
+          
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const CrunkerConstructor = (Crunker as any).default || Crunker;
           const crunker = new CrunkerConstructor();
-          const [fullBuffer] = await crunker.fetchAudio(recording.url);
           
-          const reg = selectedRegion;
-          if (reg.end - reg.start >= 0.05) {
-              const slicedBuffer = crunker.sliceAudio(fullBuffer, reg.start, reg.end);
+          if (oEnd - oStart >= 0.05) {
+              const slicedBuffer = crunker.sliceAudio(originalBuffer, oStart, oEnd);
               const { blob } = crunker.export(slicedBuffer, "audio/wav");
               
               const fd = new FormData();
@@ -300,22 +429,24 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
               fd.append('audio', blob, 'segment.wav');
               await fetch('/upload', { method: 'POST', body: fd });
               
-              // Mark as adopted instead of removing to maintain boundary list and obscure waveform visually
-              (reg as any).isAdopted = true;
+              selectedRegion.remove();
               setSelectedRegion(null);
               
-              isUpdatingRef.current = true;
+              const newAdopted = [...adoptedRegions, { start: oStart, end: oEnd }];
+              setAdoptedRegions(newAdopted);
               
-              const newAll = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
-              newAll.forEach((r, i) => {
-                  if ((r as any).isAdopted) {
-                      r.setOptions({ color: '#000', resize: false });
-                  } else {
-                      r.setOptions({ color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)' });
-                  }
+              const currentVis = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
+              const mapped = currentVis.map(r => ({
+                  start: visualToOriginalTime(r.start), // Maps accurately using OLD adoptedRegions
+                  end: visualToOriginalTime(r.end)
+              }));
+              setManualRegions(mapped);
+              
+              fetch(`/api/recordings/${recording.filename}/state`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ adoptedRegions: newAdopted, manualRegions: mapped })
               });
-              isUpdatingRef.current = false;
-              saveHistory();
           }
       } catch (err) {
           console.error("Adopt Current Error:", err);
@@ -333,24 +464,47 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         const CrunkerConstructor = (Crunker as any).default || Crunker;
         const crunker = new CrunkerConstructor();
         
-        // fetchAudio resamples to the instance's context rate automatically
-        const [fullBuffer] = await crunker.fetchAudio(recording.url);
-        
         const regs = regionsRef.current?.getRegions().sort((a, b) => a.start - b.start) || [];
 
         for (let i = 0; i < regs.length; i++) {
             const reg = regs[i];
-            if (reg.end - reg.start < 0.05) continue;
-            if ((reg as any).isAdopted) continue;
+            const vStart = reg.start;
+            const vEnd = reg.end;
             
-            const slicedBuffer = crunker.sliceAudio(fullBuffer, reg.start, reg.end);
+            const oStart = visualToOriginalTime(vStart);
+            const oEnd = visualToOriginalTime(vEnd);
+            
+            if (oEnd - oStart < 0.05) continue;
+            
+            const slicedBuffer = crunker.sliceAudio(originalBuffer, oStart, oEnd);
             const { blob } = crunker.export(slicedBuffer, "audio/wav");
             
             const fd = new FormData();
             fd.append('type', 'upload_segments');
             fd.append('audio', blob, 'segment.wav');
             await fetch('/upload', { method: 'POST', body: fd });
+            
+            // Wait to ensure order or rate limits
+            await new Promise(r => setTimeout(r, 100));
         }
+        
+        const newAdopted = [...adoptedRegions];
+        for (let i = 0; i < regs.length; i++) {
+            const vStart = regs[i].start;
+            const vEnd = regs[i].end;
+            const oStart = visualToOriginalTime(vStart);
+            const oEnd = visualToOriginalTime(vEnd);
+            if (oEnd - oStart >= 0.05) {
+                newAdopted.push({ start: oStart, end: oEnd });
+            }
+        }
+        
+        fetch(`/api/recordings/${recording.filename}/state`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adoptedRegions: newAdopted, manualRegions: [] })
+        });
+        
         onAdopt();
     } catch (err) {
         console.error("Splitter Error:", err);
@@ -359,6 +513,10 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         setIsProcessing(false);
     }
   };
+
+  if (!isStateLoaded) {
+      return <div style={{ color: '#fff', padding: '24px' }}>Loading...</div>;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -376,7 +534,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         <button onClick={onCancel} style={{ background: '#333', border: 'none', borderRadius: '8px', padding: '10px 20px', color: '#fff', cursor: 'pointer', fontWeight: 'bold' }}>CANCEL</button>
       </div>
 
-      <WaveformViewer url={recording.url} threshold={threshold} onReady={handleWaveformReady} />
+      {displayUrl ? <WaveformViewer url={displayUrl} threshold={threshold} onReady={handleWaveformReady} /> : <div style={{ height: 220 }}></div>}
 
       {mode === 'auto' ? (
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '24px', alignItems: 'end', padding: '24px', background: '#111', borderRadius: '16px', border: '1px solid #444' }}>

@@ -464,6 +464,21 @@ app.post('/api/lab/:filename', express.text({ type: '*/*' }), (req, res) => {
     res.json({ success: true });
 });
 
+app.get('/api/recordings/:filename/state', (req, res) => {
+    const stateFile = path.join(uploadsDir, `${req.params.filename}.state.json`);
+    if (fs.existsSync(stateFile)) {
+        res.json(JSON.parse(fs.readFileSync(stateFile, 'utf-8')));
+    } else {
+        res.json({ regions: [] });
+    }
+});
+
+app.post('/api/recordings/:filename/state', express.json(), (req, res) => {
+    const stateFile = path.join(uploadsDir, `${req.params.filename}.state.json`);
+    fs.writeFileSync(stateFile, JSON.stringify(req.body, null, 2));
+    res.json({ success: true });
+});
+
 app.get('/api/recordings', (req, res) => {
     const rawFiles = fs.readdirSync(uploadsDir)
         .filter(f => f.endsWith('.wav') && !/^\d+\.wav$/.test(f))
