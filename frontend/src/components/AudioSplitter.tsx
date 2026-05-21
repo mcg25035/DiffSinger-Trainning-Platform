@@ -73,43 +73,65 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
 
   useEffect(() => {
       if (!originalBuffer) return;
+      if (mode === 'auto') {
+          setDisplayUrl(recording.url);
+          return;
+      }
       
       const sortedAdopted = [...adoptedRegions].sort((a, b) => a.start - b.start);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const CrunkerConstructor = (Crunker as any).default || Crunker;
       const crunker = new CrunkerConstructor();
       
-      let buffersToConcat: AudioBuffer[] = [];
-      let currentStart = 0;
+      const sr = originalBuffer.sampleRate;
+      let totalLen = 0;
       
+      const parts: {start: number, end: number}[] = [];
+      let currentStart = 0;
       for (const reg of sortedAdopted) {
           if (reg.start > currentStart) {
-              buffersToConcat.push(crunker.sliceAudio(originalBuffer, currentStart, reg.start));
+              parts.push({start: currentStart, end: reg.start});
+              totalLen += (reg.start - currentStart);
           }
           currentStart = Math.max(currentStart, reg.end);
       }
-      
       if (currentStart < originalBuffer.duration) {
-          buffersToConcat.push(crunker.sliceAudio(originalBuffer, currentStart, originalBuffer.duration));
+          parts.push({start: currentStart, end: originalBuffer.duration});
+          totalLen += (originalBuffer.duration - currentStart);
       }
       
-      let finalBuffer: AudioBuffer;
-      if (buffersToConcat.length === 0) {
-          finalBuffer = audioContext.createBuffer(1, 1, originalBuffer.sampleRate);
-      } else if (buffersToConcat.length === 1) {
-          finalBuffer = buffersToConcat[0];
-      } else {
-          finalBuffer = crunker.concatAudio(buffersToConcat);
+      if (totalLen <= 0) {
+          const empty = audioContext.createBuffer(1, 1, sr);
+          const { blob } = crunker.export(empty, "audio/wav");
+          const url = URL.createObjectURL(blob);
+          setDisplayUrl(url);
+          return () => URL.revokeObjectURL(url);
       }
       
-      const { blob } = crunker.export(finalBuffer, "audio/wav");
+      const newBuffer = audioContext.createBuffer(1, Math.floor(totalLen * sr), sr);
+      const newChannel = newBuffer.getChannelData(0);
+      const oldChannel = originalBuffer.getChannelData(0);
+      
+      let offset = 0;
+      for (const part of parts) {
+          const sIdx = Math.floor(part.start * sr);
+          const eIdx = Math.floor(part.end * sr);
+          const len = eIdx - sIdx;
+          if (len > 0) {
+              newChannel.set(oldChannel.subarray(sIdx, eIdx), offset);
+              offset += len;
+          }
+      }
+      
+      const { blob } = crunker.export(newBuffer, "audio/wav");
       const url = URL.createObjectURL(blob);
       setDisplayUrl(url);
       
       return () => URL.revokeObjectURL(url);
-  }, [originalBuffer, adoptedRegions, audioContext]);
+  }, [originalBuffer, adoptedRegions, audioContext, mode, recording.url]);
 
   const visualToOriginalTime = useCallback((visualTime: number) => {
+      if (mode === 'auto') return visualTime;
       let originalTime = visualTime;
       const sorted = [...adoptedRegions].sort((a, b) => a.start - b.start);
       for (const reg of sorted) {
@@ -118,53 +140,54 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
           }
       }
       return originalTime;
-  }, [adoptedRegions]);
+  }, [adoptedRegions, mode]);
 
   const originalToVisualTime = useCallback((originalTime: number) => {
+      if (mode === 'auto') return originalTime;
       let visualTime = originalTime;
       const sorted = [...adoptedRegions].sort((a, b) => a.start - b.start);
       for (const reg of sorted) {
           if (originalTime >= reg.end) {
               visualTime -= (reg.end - reg.start);
           } else if (originalTime > reg.start && originalTime < reg.end) {
-              // Should not happen for active regions, but map to boundary
               visualTime -= (originalTime - reg.start);
           }
       }
       return Math.max(0, visualTime);
-  }, [adoptedRegions]);
+  }, [adoptedRegions, mode]);
 
   const saveHistory = useCallback(() => {
     if (!regionsRef.current) return;
     const currentVis = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
     
-    const mapped = currentVis.map(r => ({
-        start: visualToOriginalTime(r.start),
-        end: visualToOriginalTime(r.end)
-    }));
-    
-    setManualRegions(mapped);
-    
-    setUndoStack(prev => {
-        if (prev.length > 0) {
-            const last = prev[prev.length - 1];
-            if (last.length === mapped.length && last.every((r, i) => Math.abs(r.start - mapped[i].start) < 0.001 && Math.abs(r.end - mapped[i].end) < 0.001)) {
-                return prev;
+    if (mode === 'manual') {
+        const mapped = currentVis.map(r => ({
+            start: visualToOriginalTime(r.start),
+            end: visualToOriginalTime(r.end)
+        }));
+        
+        setManualRegions(mapped);
+        
+        setUndoStack(prev => {
+            if (prev.length > 0) {
+                const last = prev[prev.length - 1];
+                if (last.length === mapped.length && last.every((r, i) => Math.abs(r.start - mapped[i].start) < 0.001 && Math.abs(r.end - mapped[i].end) < 0.001)) {
+                    return prev;
+                }
             }
-        }
-        return [...prev, mapped];
-    });
+            return [...prev, mapped];
+        });
 
-    fetch(`/api/recordings/${recording.filename}/state`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            adoptedRegions,
-            manualRegions: mapped
-        })
-    }).catch(err => console.error("Save state error:", err));
-
-  }, [visualToOriginalTime, adoptedRegions, recording.filename]);
+        fetch(`/api/recordings/${recording.filename}/state`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                adoptedRegions,
+                manualRegions: mapped
+            })
+        }).catch(err => console.error("Save state error:", err));
+    }
+  }, [visualToOriginalTime, adoptedRegions, recording.filename, mode]);
 
   const queueSaveHistory = useCallback(() => {
       if (saveHistoryTimeout.current) clearTimeout(saveHistoryTimeout.current);
@@ -235,8 +258,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         regions.addRegion({ start: cur, end: p, color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)', drag: false, resize: true });
         cur = p;
     });
-    saveHistory();
-  }, [threshold, minGap, maxLen, calculateSplitPoints, saveHistory]);
+  }, [threshold, minGap, maxLen, calculateSplitPoints]);
 
   const handleWaveformReady = useCallback((ws: WaveSurfer, regions: RegionsPlugin) => {
     wavesurferRef.current = ws; 
@@ -268,27 +290,30 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         queueSaveHistory();
     });
     
-    // Initialize regions
     regions.clearRegions();
     setSelectedRegion(null);
     
-    if (manualRegions.length > 0) {
-        manualRegions.forEach((reg, i) => {
-            const vStart = originalToVisualTime(reg.start);
-            const vEnd = originalToVisualTime(reg.end);
-            regions.addRegion({
-                start: vStart,
-                end: vEnd,
-                color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)',
-                drag: false,
-                resize: true
+    if (mode === 'manual') {
+        if (manualRegions.length > 0) {
+            manualRegions.forEach((reg, i) => {
+                const vStart = originalToVisualTime(reg.start);
+                const vEnd = originalToVisualTime(reg.end);
+                regions.addRegion({
+                    start: vStart,
+                    end: vEnd,
+                    color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)',
+                    drag: false,
+                    resize: true
+                });
             });
-        });
+        } else {
+            regions.addRegion({ start: 0, end: ws.getDuration(), color: 'rgba(255,255,255,0.08)', drag: false, resize: true });
+        }
     } else {
-        regions.addRegion({ start: 0, end: ws.getDuration(), color: 'rgba(255,255,255,0.08)', drag: false, resize: true });
+        runAutoDetect();
     }
 
-  }, [queueSaveHistory, manualRegions, originalToVisualTime]);
+  }, [queueSaveHistory, manualRegions, originalToVisualTime, mode, runAutoDetect]);
 
   useEffect(() => { 
       if (!isLoaded) return;
@@ -344,9 +369,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
                     const oldEnd = selectedRegion.end;
                     
                     isUpdatingRef.current = true;
-                    
                     selectedRegion.setOptions({ end: time });
-                    
                     regionsRef.current.addRegion({
                         start: time,
                         end: oldEnd,
@@ -437,7 +460,7 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
               
               const currentVis = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
               const mapped = currentVis.map(r => ({
-                  start: visualToOriginalTime(r.start), // Maps accurately using OLD adoptedRegions
+                  start: visualToOriginalTime(r.start),
                   end: visualToOriginalTime(r.end)
               }));
               setManualRegions(mapped);
@@ -488,23 +511,8 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
             await new Promise(r => setTimeout(r, 100));
         }
         
-        const newAdopted = [...adoptedRegions];
-        for (let i = 0; i < regs.length; i++) {
-            const vStart = regs[i].start;
-            const vEnd = regs[i].end;
-            const oStart = visualToOriginalTime(vStart);
-            const oEnd = visualToOriginalTime(vEnd);
-            if (oEnd - oStart >= 0.05) {
-                newAdopted.push({ start: oStart, end: oEnd });
-            }
-        }
-        
-        fetch(`/api/recordings/${recording.filename}/state`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ adoptedRegions: newAdopted, manualRegions: [] })
-        });
-        
+        // Auto process adopts everything but doesn't necessarily collapse it because auto mode uses original timeline.
+        // But let's just complete the adoption.
         onAdopt();
     } catch (err) {
         console.error("Splitter Error:", err);
@@ -564,9 +572,6 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
           <div style={{ display: 'flex', gap: '16px' }}>
               <button onClick={handleAdoptCurrent} disabled={!selectedRegion || isProcessing} style={{ padding: '0 30px', height: '52px', background: selectedRegion ? '#00e5ff' : '#444', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: selectedRegion ? 'pointer' : 'not-allowed' }}>
                 {isProcessing ? 'SAVING...' : 'ADOPT SELECTED'}
-              </button>
-              <button onClick={handleProcess} disabled={isProcessing || !isLoaded} style={{ padding: '0 30px', height: '52px', background: '#fff', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>
-                ADOPT ALL
               </button>
           </div>
       </div>
