@@ -21,7 +21,12 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
   const syncAnimRef = useRef<number | null>(null);
+  const playbackRateRef = useRef(playbackRate);
   const [isAudioLoaded, setIsAudioLoaded] = useState(false);
+
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+  }, [playbackRate]);
 
   useEffect(() => {
     const CrunkerConstructor = (Crunker as any).default || Crunker;
@@ -85,7 +90,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     blobUrlRef.current = blobUrl;
     const audio = new Audio(blobUrl);
     applyPitchFix(audio);
-    audio.playbackRate = playbackRate;
+    audio.playbackRate = playbackRateRef.current;
     applyPitchFix(audio);
     audioRef.current = audio;
     audio.onended = () => {
@@ -100,7 +105,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     audio.onplay = () => {
       onToggleIsPlaying(true);
       applyPitchFix(audio);
-      audio.playbackRate = playbackRate;
+      audio.playbackRate = playbackRateRef.current;
       startSyncLoop(start);
     };
     audio.onpause = () => onToggleIsPlaying(false);
@@ -111,7 +116,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     stop();
     const audio = new Audio(url);
     applyPitchFix(audio);
-    audio.playbackRate = playbackRate;
+    audio.playbackRate = playbackRateRef.current;
     applyPitchFix(audio);
     audio.currentTime = startTime;
     audioRef.current = audio;
@@ -126,7 +131,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
     audio.onplay = () => {
       onToggleIsPlaying(true);
       applyPitchFix(audio);
-      audio.playbackRate = playbackRate;
+      audio.playbackRate = playbackRateRef.current;
       startSyncLoop(0);
     };
     audio.onpause = () => onToggleIsPlaying(false);
