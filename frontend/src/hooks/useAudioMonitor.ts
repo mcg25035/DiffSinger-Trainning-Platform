@@ -162,44 +162,68 @@ export function useAudioMonitor() {
 
     const uploadFile = async (file: File) => {
         const sizeMb = (file.size / 1024 / 1024).toFixed(2);
-        setStatus({ text: `準備上傳... (${sizeMb}MB)`, color: "blue" });
+        setStatus({ text: `準備分塊上傳... (${sizeMb}MB)`, color: "blue" });
         
         try {
-            const formData = new FormData();
-            formData.append('type', 'raw'); 
-            formData.append('audio', file);
+            const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB per chunk
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+            const uploadId = `upload-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
             
-            setStatus({ text: "建立連線中... 0%", color: "blue" });
+            let uploadedBytes = 0;
             
-            await new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', '/upload', true);
+            for (let i = 0; i < totalChunks; i++) {
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, file.size);
+                const chunk = file.slice(start, end);
                 
-                // 設定一個超時時間 (例如 5 分鐘)
-                xhr.timeout = 300000;
-                
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        const percentComplete = Math.round((e.loaded / e.total) * 100);
-                        const loadedMb = (e.loaded / 1024 / 1024).toFixed(2);
-                        setStatus({ text: `上傳中... ${percentComplete}% (${loadedMb}/${sizeMb}MB)`, color: "blue" });
-                    }
-                };
-                
-                xhr.onload = () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        resolve(xhr.responseText);
-                    } else {
-                        reject(new Error(`伺服器拒絕 (HTTP ${xhr.status})`));
-                    }
-                };
-                
-                xhr.onerror = () => reject(new Error("網路錯誤或被擋"));
-                xhr.onabort = () => reject(new Error("被瀏覽器中斷"));
-                xhr.ontimeout = () => reject(new Error("連線逾時"));
-                
-                xhr.send(formData);
+                await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', `/upload_chunk?uploadId=${uploadId}&chunkIndex=${i}`, true);
+                    xhr.timeout = 120000; // 2 mins per chunk
+                    
+                    xhr.upload.onprogress = (e) => {
+                        if (e.lengthComputable) {
+                            const currentTotalLoaded = uploadedBytes + e.loaded;
+                            const percentComplete = Math.round((currentTotalLoaded / file.size) * 100);
+                            const loadedMb = (currentTotalLoaded / 1024 / 1024).toFixed(2);
+                            setStatus({ text: `上傳中... ${percentComplete}% (${loadedMb}/${sizeMb}MB)`, color: "blue" });
+                        }
+                    };
+                    
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            uploadedBytes += chunk.size;
+                            resolve(xhr.responseText);
+                        } else {
+                            reject(new Error(`伺服器拒絕分塊 ${i} (HTTP ${xhr.status})`));
+                        }
+                    };
+                    
+                    xhr.onerror = () => reject(new Error("網路錯誤或被擋"));
+                    xhr.onabort = () => reject(new Error("被瀏覽器中斷"));
+                    xhr.ontimeout = () => reject(new Error("連線逾時"));
+                    
+                    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+                    xhr.send(chunk);
+                });
+            }
+            
+            setStatus({ text: "合併檔案中...", color: "blue" });
+            
+            const completeResponse = await fetch('/upload_complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uploadId,
+                    totalChunks,
+                    filename: file.name,
+                    type: 'raw'
+                })
             });
+            
+            if (!completeResponse.ok) {
+                throw new Error(`合併失敗 (HTTP ${completeResponse.status})`);
+            }
             
             fetchRecordings();
             setStatus({ text: "✅ 檔案已上傳", color: "green" });

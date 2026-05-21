@@ -26,6 +26,11 @@ if (!fs.existsSync(segmentsDir)) {
     fs.mkdirSync(segmentsDir);
 }
 
+const chunkUploadDir = path.join(__dirname, 'upload_chunks');
+if (!fs.existsSync(chunkUploadDir)) {
+    fs.mkdirSync(chunkUploadDir);
+}
+
 const dictionariesDir = path.join(__dirname, 'dictionaries');
 if (!fs.existsSync(dictionariesDir)) {
     fs.mkdirSync(dictionariesDir);
@@ -315,6 +320,48 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
     }
 
     res.json({ filename: filename });
+});
+
+app.post('/upload_chunk', express.raw({ limit: '20mb', type: '*/*' }), (req, res) => {
+    const { uploadId, chunkIndex } = req.query;
+    if (!uploadId || chunkIndex === undefined) return res.status(400).send('Missing params');
+    
+    const chunkPath = path.join(chunkUploadDir, `${uploadId}_${chunkIndex}`);
+    fs.writeFileSync(chunkPath, req.body);
+    res.json({ success: true });
+});
+
+app.post('/upload_complete', express.json(), (req, res) => {
+    const { uploadId, totalChunks, filename, type } = req.body;
+    
+    let finalName = '';
+    if (type === 'upload_segments') {
+        finalName = String(getNextNumber(segmentsDir)).padStart(3, '0') + '.wav';
+    } else {
+        finalName = `raw-audio-${Date.now()}-${Math.floor(Math.random() * 1000)}.wav`;
+    }
+    
+    const finalPath = type === 'upload_segments' 
+        ? path.join(segmentsDir, finalName) 
+        : path.join(uploadsDir, finalName);
+        
+    const writeStream = fs.createWriteStream(finalPath);
+    for (let i = 0; i < totalChunks; i++) {
+        const chunkPath = path.join(chunkUploadDir, `${uploadId}_${i}`);
+        if (!fs.existsSync(chunkPath)) {
+            return res.status(400).send(`Missing chunk ${i}`);
+        }
+        const data = fs.readFileSync(chunkPath);
+        writeStream.write(data);
+        fs.unlinkSync(chunkPath);
+    }
+    writeStream.end();
+    
+    if (type === 'upload_segments') {
+        transcribeFile(finalName);
+    }
+    
+    res.json({ filename: finalName });
 });
 
 app.post('/api/transcribe', express.json(), async (req, res) => {

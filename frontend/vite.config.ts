@@ -16,6 +16,8 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/upload': `http://localhost:${backendPort}`, // Proxy API requests to Express server during development
+        '/upload_chunk': `http://localhost:${backendPort}`,
+        '/upload_complete': `http://localhost:${backendPort}`,
         '/api': `http://localhost:${backendPort}`,
         '/uploads': `http://localhost:${backendPort}`,
         '/upload_segments': `http://localhost:${backendPort}`
