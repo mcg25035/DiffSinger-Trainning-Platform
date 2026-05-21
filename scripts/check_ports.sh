@@ -37,7 +37,7 @@ check_port() {
             # docker-proxy 會監聽這些 port
             if [[ "$cmd" == *"docker-proxy"* ]]; then
                  # 檢查是否有我們的 container 綁定這個 port
-                 local container=$(sudo docker ps --format "{{.Names}} {{.Ports}}" | grep ":$port->" | awk '{print $1}')
+                 local container=$(docker ps --format "{{.Names}} {{.Ports}}" 2>/dev/null | grep ":$port->" | awk '{print $1}')
                  if [[ "$container" == *"mfa_aligner_api"* || "$container" == *"sensevoice-hira-api"* ]]; then
                      is_ours=true
                  fi

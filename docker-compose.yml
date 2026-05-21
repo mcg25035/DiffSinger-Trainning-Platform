@@ -1,0 +1,42 @@
+services:
+  mfa-service:
+    build:
+      context: ./mfa/mfa_service
+      dockerfile: Dockerfile
+    image: mfa-aligner-service:latest
+    container_name: mfa_aligner_api
+    ports:
+      - "${MFA_PORT:-8001}:8001"
+    volumes:
+      - mfa_data:/home/mfauser/Documents/MFA
+      - ./mfa/mfa_service/app:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  sensevoice-hira-api:
+    build:
+      context: ./lyrics_regonizer
+      args:
+        BASE_IMAGE: nvidia/cuda:${BASE_IMAGE_TAG:-11.0.3-base-ubuntu20.04}
+        PYTORCH_INDEX: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu110}
+        TORCH_VERSION: ${TORCH_VERSION:-1.7.1+cu110}
+        TORCHAUDIO_VERSION: ${TORCHAUDIO_VERSION:-0.7.2}
+    image: sensevoice-hira-api
+    ports:
+      - "${LYRICS_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  mfa_data:
+    name: mfa_data_storage

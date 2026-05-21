@@ -3,8 +3,9 @@ const multer = require('multer');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios');
 const FormData = require('form-data');
+const mfaService = require('./services/mfa-client');
+const lyricsService = require('./services/lyrics-client');
 
 const app = express();
 require('dotenv').config();
@@ -83,14 +84,7 @@ async function processMfaQueue() {
     form.append('lyrics_json', JSON.stringify(lyricsData));
 
     try {
-        const response = await axios.post(`http://localhost:${process.env.MFA_PORT || 8001}/align_batch?model=japanese_mfa&tier_type=phones`, form, {
-            headers: form.getHeaders(),
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            timeout: 600000 // 10 minutes
-        });
-
-        const results = response.data;
+        const results = await mfaService.alignBatch(form);
         for (const task of activeTasks) {
             const result = results[task.filename];
             if (result && !result.startsWith('ERROR:')) {
@@ -133,6 +127,20 @@ async function processMfaQueue() {
         setTimeout(processMfaQueue, 500); // Small delay before next batch
     }
 }
+
+// --- Health Check ---
+app.get('/api/health', async (req, res) => {
+    const [mfa, lyrics] = await Promise.all([
+        mfaService.healthCheck(),
+        lyricsService.healthCheck(),
+    ]);
+
+    const allOk = mfa.ok && lyrics.ok;
+    res.status(allOk ? 200 : 503).json({
+        status: allOk ? 'healthy' : 'degraded',
+        services: { mfa, lyrics },
+    });
+});
 
 app.get('/api/jobs/:id', (req, res) => {
     const job = jobs[req.params.id];
@@ -202,8 +210,8 @@ app.delete('/api/mappings/:id', (req, res) => {
 
 app.get('/api/mfa/models', async (req, res) => {
     try {
-        const response = await axios.get(`http://localhost:${process.env.MFA_PORT || 8001}/models`);
-        res.json(response.data);
+        const data = await mfaService.getModels();
+        res.json(data);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -211,8 +219,8 @@ app.get('/api/mfa/models', async (req, res) => {
 
 app.get('/api/mfa/phones/:model', async (req, res) => {
     try {
-        const response = await axios.get(`http://localhost:${process.env.MFA_PORT || 8001}/model_phones/${req.params.model}`);
-        res.json(response.data);
+        const data = await mfaService.getModelPhones(req.params.model);
+        res.json(data);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -280,19 +288,13 @@ async function transcribeFile(filename) {
     const pendingPath = wavPath.replace(/\.wav$/, '.pending');
 
     try {
-        const form = new FormData();
-        form.append('file', fs.createReadStream(wavPath));
+        const data = await lyricsService.transcribe(wavPath);
 
-        const response = await axios.post(`http://localhost:${process.env.LYRICS_PORT || 8000}/transcribe`, form, {
-            headers: form.getHeaders(),
-            timeout: 120000 
-        });
-
-        if (response.data && response.data.romaji) {
-            fs.writeFileSync(txtPath, response.data.romaji);
+        if (data && data.romaji) {
+            fs.writeFileSync(txtPath, data.romaji);
             fs.writeFileSync(pendingPath, ''); 
-            console.log(`[AI] Transcribed ${filename}: ${response.data.romaji}`);
-            return { success: true, lyrics: response.data.romaji };
+            console.log(`[AI] Transcribed ${filename}: ${data.romaji}`);
+            return { success: true, lyrics: data.romaji };
         }
     } catch (err) {
         console.error(`[AI] Transcription Failed for ${filename}:`, err.message);
@@ -326,12 +328,8 @@ app.post('/api/transcribe', express.json(), async (req, res) => {
 app.post('/api/validate_lyrics', express.json(), async (req, res) => {
     const { lyrics, model } = req.body;
     try {
-        const form = new FormData();
-        form.append('romanji_lyrics', lyrics);
-        const response = await axios.post(`http://localhost:${process.env.MFA_PORT || 8001}/validate_lyrics?model=${model || 'japanese_mfa'}`, form, {
-            headers: form.getHeaders()
-        });
-        res.json(response.data);
+        const data = await mfaService.validateLyrics(lyrics, model);
+        res.json(data);
     } catch (err) {
         res.status(500).json({ valid: false, message: err.message });
     }
@@ -449,6 +447,28 @@ app.get('/api/recordings', (req, res) => {
     res.json({ raw: rawFiles, segments: segmentFiles });
 });
 
-app.listen(PORT, () => {
-    console.log(`FINAL STRICT SERVER listening on ${PORT}`);
+app.listen(PORT, async () => {
+    console.log(`Server listening on ${PORT}`);
+
+    // 非阻塞式等待子服務就緒，最多 60 秒
+    const maxWait = 60000;
+    const interval = 3000;
+    const start = Date.now();
+
+    const waitFor = async (name, checkFn) => {
+        while (Date.now() - start < maxWait) {
+            const result = await checkFn();
+            if (result.ok) {
+                console.log(`✅ ${name} service ready (${result.latencyMs}ms)`);
+                return;
+            }
+            await new Promise(r => setTimeout(r, interval));
+        }
+        console.warn(`⚠️ ${name} service not ready after ${maxWait / 1000}s, continuing anyway`);
+    };
+
+    await Promise.all([
+        waitFor('MFA', mfaService.healthCheck),
+        waitFor('Lyrics', lyricsService.healthCheck),
+    ]);
 });
