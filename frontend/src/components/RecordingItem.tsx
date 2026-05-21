@@ -286,7 +286,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
           </button>
           
           <div style={{ display: 'flex', gap: '2px' }}>
-            {[0.5, 0.75, 1].map(rate => (
+            {[0.5, 0.75, 1, 3].map(rate => (
               <button
                 key={rate}
                 onClick={(e) => { e.stopPropagation(); setPlaybackRate(rate); }}
@@ -302,7 +302,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
                   letterSpacing: '-0.2px'
                 }}
               >
-                {rate === 1 ? '1x' : rate}
+                {rate === 1 ? '1x' : rate + 'x'}
               </button>
             ))}
           </div>
@@ -322,8 +322,48 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{ width: '40px', height: '2px', background: '#222', borderRadius: '2px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${progress}%`, background: isPlaying ? '#00e676' : '#2979ff' }} />
+          <div 
+            style={{ width: '80px', height: '16px', display: 'flex', alignItems: 'center', cursor: 'pointer', position: 'relative' }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              const div = e.currentTarget as HTMLDivElement;
+              const updateProgress = (clientX: number) => {
+                if (audioObjRef.current && audioObjRef.current.duration) {
+                  const rect = div.getBoundingClientRect();
+                  const x = clientX - rect.left;
+                  const percent = Math.max(0, Math.min(1, x / rect.width));
+                  audioObjRef.current.currentTime = percent * audioObjRef.current.duration;
+                  setProgress(percent * 100);
+                }
+              };
+              updateProgress(e.clientX);
+              const onPointerMove = (moveEvent: PointerEvent) => {
+                moveEvent.preventDefault();
+                updateProgress(moveEvent.clientX);
+              };
+              const onPointerUp = () => {
+                document.removeEventListener('pointermove', onPointerMove);
+                document.removeEventListener('pointerup', onPointerUp);
+              };
+              document.addEventListener('pointermove', onPointerMove);
+              document.addEventListener('pointerup', onPointerUp);
+            }}
+          >
+            <div style={{ width: '100%', height: '4px', background: '#222', borderRadius: '2px', overflow: 'hidden', pointerEvents: 'none' }}>
+              <div style={{ height: '100%', width: `${progress}%`, background: isPlaying ? '#00e676' : '#2979ff' }} />
+            </div>
+            <div style={{
+              position: 'absolute',
+              left: `${progress}%`,
+              top: '50%',
+              transform: 'translate(-50%, -50%)',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#fff',
+              pointerEvents: 'none',
+              boxShadow: '0 0 2px rgba(0,0,0,0.5)'
+            }} />
           </div>
 
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>

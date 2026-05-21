@@ -8,3 +8,7 @@ __pycache__/
 .antigravitycli
 screenshot
 public
+exp-mfa-pretrain
+find_c.py
+fix_lab.py
+check_coverage.py
