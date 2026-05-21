@@ -22,7 +22,9 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
   const blobUrlRef = useRef<string | null>(null);
   const syncAnimRef = useRef<number | null>(null);
   const playbackRateRef = useRef(playbackRate);
-  // 同步追蹤播放狀態，不依賴 React state 的非同步更新
+  // 播放 session 計數器：每次啟動新播放就 +1，所有非同步回調都用它判斷自己是否過期
+  const sessionRef = useRef(0);
+  // 同步播放狀態（不依賴 React 非同步 state）
   const isPlayingRef = useRef(false);
   const [isAudioLoaded, setIsAudioLoaded] = useState(false);
 
@@ -39,7 +41,7 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
       setIsAudioLoaded(true);
     });
     return () => {
-      stopInternal(false); // cleanup without notifying UI — component is unmounting
+      killSession();
       fullAudioBufferRef.current = null;
     };
   }, [url]);
@@ -52,121 +54,141 @@ function usePreciseAudio(url: string, playbackRate: number, onTimeUpdate: (time:
   };
 
   /**
-   * 內部停止，notifyUI 控制是否通知 React state
-   * 當我們要「停了馬上開始新播放」時，傳 false 避免多餘的 false→true state flip
+   * 無條件殺死當前播放 session。
+   * 把 audio 的所有事件清除後再 pause，確保不會有殘留回調。
    */
-  const stopInternal = (notifyUI: boolean) => {
+  const killSession = () => {
+    // 讓所有舊的非同步回調失效
+    sessionRef.current++;
+
     if (syncAnimRef.current) {
       cancelAnimationFrame(syncAnimRef.current);
       syncAnimRef.current = null;
     }
     if (audioRef.current) {
-      // 解除事件，避免舊 audio 的 onpause 在 pause() 後觸發並干擾新播放
       const old = audioRef.current;
       old.onplay = null;
       old.onpause = null;
       old.onended = null;
-      old.pause();
-      old.src = "";
+      try { old.pause(); } catch (_) { /* ignore */ }
+      old.removeAttribute('src');
+      old.load(); // 釋放資源
       audioRef.current = null;
     }
     if (blobUrlRef.current) {
       URL.revokeObjectURL(blobUrlRef.current);
       blobUrlRef.current = null;
     }
-    if (notifyUI) {
-      isPlayingRef.current = false;
-      onToggleIsPlaying(false);
-    }
+    isPlayingRef.current = false;
+    onToggleIsPlaying(false);
   };
 
-  const stop = () => stopInternal(true);
+  const stop = () => killSession();
 
-  const startSyncLoop = (offset: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const sync = () => {
-      if (audioRef.current === audio && !audio.paused && !audio.ended) {
+  const startSyncLoop = (mySession: number, offset: number) => {
+    const tick = () => {
+      // session 不一致 → 這個 loop 已過期，自動退出
+      if (sessionRef.current !== mySession) return;
+      const audio = audioRef.current;
+      if (audio && !audio.paused && !audio.ended) {
         onTimeUpdate(offset + audio.currentTime);
-        syncAnimRef.current = requestAnimationFrame(sync);
+        syncAnimRef.current = requestAnimationFrame(tick);
       }
     };
-    syncAnimRef.current = requestAnimationFrame(sync);
+    syncAnimRef.current = requestAnimationFrame(tick);
   };
 
   const playRange = (start: number, end: number) => {
     const fullBuffer = fullAudioBufferRef.current;
     if (!fullBuffer) return;
-    // 停止舊播放但不通知 UI，避免 isPlaying false→true 的閃爍
-    stopInternal(false);
+
+    // 殺死舊 session，取得新 session ID
+    killSession();
+    const mySession = sessionRef.current;
+
     const CrunkerConstructor = (Crunker as any).default || Crunker;
     const crunker = new CrunkerConstructor();
     const sliceBuffer = crunker.sliceAudio(fullBuffer, start, end);
     const { blob } = crunker.export(sliceBuffer, "audio/wav");
     const blobUrl = URL.createObjectURL(blob);
     blobUrlRef.current = blobUrl;
+
     const audio = new Audio(blobUrl);
     applyPitchFix(audio);
     audio.playbackRate = playbackRateRef.current;
     applyPitchFix(audio);
     audioRef.current = audio;
+
     audio.onended = () => {
-      if (audioRef.current === audio) {
-        if (blobUrlRef.current === blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlRef.current = null; }
-        audioRef.current = null;
-        isPlayingRef.current = false;
-        onToggleIsPlaying(false);
-        onTimeUpdate(start);
-        if (syncAnimRef.current) cancelAnimationFrame(syncAnimRef.current);
-      }
+      if (sessionRef.current !== mySession) return;
+      if (blobUrlRef.current === blobUrl) { URL.revokeObjectURL(blobUrl); blobUrlRef.current = null; }
+      audioRef.current = null;
+      isPlayingRef.current = false;
+      onToggleIsPlaying(false);
+      onTimeUpdate(start);
+      if (syncAnimRef.current) { cancelAnimationFrame(syncAnimRef.current); syncAnimRef.current = null; }
     };
     audio.onplay = () => {
-      if (audioRef.current !== audio) return; // 已被新播放取代，忽略
+      if (sessionRef.current !== mySession) return;
       isPlayingRef.current = true;
       onToggleIsPlaying(true);
       applyPitchFix(audio);
       audio.playbackRate = playbackRateRef.current;
-      startSyncLoop(start);
+      startSyncLoop(mySession, start);
     };
     audio.onpause = () => {
-      if (audioRef.current !== audio) return;
-      isPlayingRef.current = false;
-      onToggleIsPlaying(false);
+      if (sessionRef.current !== mySession) return;
+      // onended 之前會先觸發 onpause，但 onended 會自己處理，所以這裡只處理「被外部暫停」的情況
+      // 如果 audio 已經 ended，不要覆蓋 onended 的邏輯
+      if (!audio.ended) {
+        isPlayingRef.current = false;
+        onToggleIsPlaying(false);
+      }
     };
-    audio.play();
+
+    // audio.play() 是非同步的，如果在 play resolve 前就被 killSession 了，
+    // Promise 會 reject（AbortError），我們要安全地吃掉這個錯誤
+    audio.play().catch(() => {
+      // 被中斷是正常操作（使用者快速切換），不需要處理
+    });
   };
 
   const playFull = (startTime: number) => {
-    stopInternal(false);
+    killSession();
+    const mySession = sessionRef.current;
+
     const audio = new Audio(url);
     applyPitchFix(audio);
     audio.playbackRate = playbackRateRef.current;
     applyPitchFix(audio);
     audio.currentTime = startTime;
     audioRef.current = audio;
+
     audio.onended = () => {
-      if (audioRef.current === audio) {
-        audioRef.current = null;
-        isPlayingRef.current = false;
-        onToggleIsPlaying(false);
-        onTimeUpdate(audio.duration);
-        if (syncAnimRef.current) cancelAnimationFrame(syncAnimRef.current);
-      }
+      if (sessionRef.current !== mySession) return;
+      audioRef.current = null;
+      isPlayingRef.current = false;
+      onToggleIsPlaying(false);
+      onTimeUpdate(audio.duration);
+      if (syncAnimRef.current) { cancelAnimationFrame(syncAnimRef.current); syncAnimRef.current = null; }
     };
     audio.onplay = () => {
-      if (audioRef.current !== audio) return;
+      if (sessionRef.current !== mySession) return;
       isPlayingRef.current = true;
       onToggleIsPlaying(true);
       applyPitchFix(audio);
       audio.playbackRate = playbackRateRef.current;
-      startSyncLoop(0);
+      startSyncLoop(mySession, 0);
     };
     audio.onpause = () => {
-      if (audioRef.current !== audio) return;
-      isPlayingRef.current = false;
-      onToggleIsPlaying(false);
+      if (sessionRef.current !== mySession) return;
+      if (!audio.ended) {
+        isPlayingRef.current = false;
+        onToggleIsPlaying(false);
+      }
     };
-    audio.play();
+
+    audio.play().catch(() => {});
   };
 
   useEffect(() => {
@@ -228,11 +250,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
     (p) => setIsPlaying(p)
   );
 
-  // 各個播放動作各自獨立的 debounce timestamp，避免 W→P 連按時互相封鎖
-  const lastPhonemePlayRef = useRef<number>(0);
-  const lastWordPlayRef = useRef<number>(0);
-  const lastFullPlayRef = useRef<number>(0);
-  const PLAY_DEBOUNCE_MS = 150;
 
   const parseLab = (content: string): LabSegment[] => {
     return content.split('\n')
@@ -783,11 +800,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const regions = regionsRef.current;
     if (!ws || !regions) return;
 
-    // 各動作獨立 debounce，不影響其他動作
-    const now = Date.now();
-    if (now - lastPhonemePlayRef.current < PLAY_DEBOUNCE_MS) return;
-    lastPhonemePlayRef.current = now;
-
     const time = ws.getCurrentTime();
     const eps = 0.01;
     
@@ -808,10 +820,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const ws = wavesurferRef.current;
     if (!ws) return;
 
-    const now = Date.now();
-    if (now - lastWordPlayRef.current < PLAY_DEBOUNCE_MS) return;
-    lastWordPlayRef.current = now;
-
     const time = ws.getCurrentTime();
     
     let word = wordInstances.find(w => time >= w.start && time < w.end)
@@ -827,11 +835,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const ws = wavesurferRef.current;
     if (!ws) return;
 
-    const now = Date.now();
-    if (now - lastFullPlayRef.current < PLAY_DEBOUNCE_MS) return;
-    lastFullPlayRef.current = now;
-
-    // 用 isPlayingRef 而不是 isPlaying state，避免 React 異步更新造成的誤判
     if (isPlayingRef.current) {
       stopAudio();
       return;
