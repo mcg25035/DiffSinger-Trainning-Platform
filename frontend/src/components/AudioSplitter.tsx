@@ -24,8 +24,60 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
+  const [undoStack, setUndoStack] = useState<{start: number, end: number}[][]>([]);
+  const saveHistoryTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const { calculateSplitPoints } = useSplitterLogic();
+
+  const saveHistory = useCallback(() => {
+    if (!regionsRef.current) return;
+    const current = regionsRef.current.getRegions()
+        .sort((a, b) => a.start - b.start)
+        .map(r => ({ start: r.start, end: r.end }));
+    
+    setUndoStack(prev => {
+        if (prev.length > 0) {
+            const last = prev[prev.length - 1];
+            if (last.length === current.length && last.every((r, i) => Math.abs(r.start - current[i].start) < 0.001 && Math.abs(r.end - current[i].end) < 0.001)) {
+                return prev;
+            }
+        }
+        return [...prev, current];
+    });
+  }, []);
+
+  const queueSaveHistory = useCallback(() => {
+      if (saveHistoryTimeout.current) clearTimeout(saveHistoryTimeout.current);
+      saveHistoryTimeout.current = setTimeout(() => {
+          saveHistory();
+      }, 300);
+  }, [saveHistory]);
+
+  const handleUndo = useCallback(() => {
+    setUndoStack(prev => {
+        if (prev.length <= 1) return prev; 
+        const newStack = [...prev];
+        newStack.pop();
+        const prevState = newStack[newStack.length - 1];
+        
+        if (regionsRef.current) {
+            isUpdatingRef.current = true;
+            regionsRef.current.clearRegions();
+            setSelectedRegion(null);
+            prevState.forEach((seg, i) => {
+                regionsRef.current?.addRegion({
+                    start: seg.start,
+                    end: seg.end,
+                    color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)',
+                    drag: false,
+                    resize: true
+                });
+            });
+            isUpdatingRef.current = false;
+        }
+        return newStack;
+    });
+  }, []);
 
   const runAutoDetect = useCallback(() => {
     const ws = wavesurferRef.current;
@@ -53,7 +105,8 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         regions.addRegion({ start: cur, end: p, color: i % 2 === 0 ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.18)', drag: false, resize: true });
         cur = p;
     });
-  }, [threshold, minGap, maxLen, calculateSplitPoints]);
+    saveHistory();
+  }, [threshold, minGap, maxLen, calculateSplitPoints, saveHistory]);
 
   const handleWaveformReady = useCallback((ws: WaveSurfer, regions: RegionsPlugin) => {
     wavesurferRef.current = ws; 
@@ -82,8 +135,9 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
         if (i < all.length - 1) all[i+1].setOptions({ start: r.end });
         if (i > 0) all[i-1].setOptions({ end: r.start });
         isUpdatingRef.current = false;
+        queueSaveHistory();
     });
-  }, []);
+  }, [queueSaveHistory]);
 
   useEffect(() => { if (isLoaded) runAutoDetect(); }, [isLoaded, runAutoDetect]);
 
@@ -100,6 +154,12 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.ctrlKey && (e.key === 'z' || e.key === 'Z')) {
+            e.preventDefault();
+            handleUndo();
+            return;
+        }
+
         if (e.key === 'Delete' || e.key === 'Backspace') {
             if (selectedRegion && regionsRef.current) {
                 const allRegions = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
@@ -129,12 +189,13 @@ export function AudioSplitter({ recording, onAdopt, onCancel }: Props) {
                 });
 
                 isUpdatingRef.current = false;
+                saveHistory();
             }
         }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedRegion]);
+  }, [selectedRegion, handleUndo, saveHistory]);
 
   const handleProcess = async () => {
     setIsProcessing(true);
