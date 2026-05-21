@@ -168,6 +168,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isUpdatingRef = useRef(false);
+  const lastPlayRequestRef = useRef<number>(0);
   
   const [isLoaded, setIsLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -712,6 +713,11 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const ws = wavesurferRef.current;
     const regions = regionsRef.current;
     if (!ws || !regions) return;
+
+    const now = Date.now();
+    if (now - lastPlayRequestRef.current < 300) return;
+    lastPlayRequestRef.current = now;
+
     const time = ws.getCurrentTime();
     const eps = 0.01;
     
@@ -719,9 +725,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
     if (all.length === 0) return;
 
     // Search logic for Phoneme:
-    // 1. If at boundary (end of a region), re-play the region that JUST ended.
-    // 2. Otherwise, play the region the cursor is currently in.
-    let target = all.find(r => time > r.start + eps && time <= r.end + eps);
+    let target = all.find(r => time >= r.start && time < r.end);
     if (!target) target = all.find(r => time >= r.start && time <= r.end);
     if (!target && time < eps) target = all[0];
                 
@@ -734,15 +738,18 @@ export function LabelEditor({ recording, onCancel }: Props) {
   const handleWordPlay = () => {
     const ws = wavesurferRef.current;
     if (!ws) return;
+
+    const now = Date.now();
+    if (now - lastPlayRequestRef.current < 300) return;
+
     const time = ws.getCurrentTime();
-    const eps = 0.01;
     
     // Search logic for Word:
-    // 1. Try to find if we are in/at-end-of a WordInstance
-    let word = wordInstances.find(w => time > w.start + eps && time <= w.end + eps)
+    let word = wordInstances.find(w => time >= w.start && time < w.end)
             || wordInstances.find(w => time >= w.start && time <= w.end);
               
     if (word) {
+      lastPlayRequestRef.current = now;
       console.log(`[PLAY-WORD] ${word.word} @ ${word.start}-${word.end}`);
       precisePlayRange(word.start, word.end);
     } else {
