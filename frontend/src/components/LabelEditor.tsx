@@ -451,7 +451,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
         labelIdx++;
         
         if (currentCombined.toLowerCase() === word.toLowerCase()) break;
-        if (group.length > 20 || currentCombined.length > word.length + 10) break; 
+        if (group.length > 5 || currentCombined.length > word.length + 5) {
+            // Prevent consuming too many labels if alignment completely fails
+            break; 
+        }
       }
 
       if (group.length > 0 && startIdx < allRegions.length) {
@@ -955,9 +958,31 @@ export function LabelEditor({ recording, onCancel }: Props) {
       <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         <div style={{ background: '#000', borderRadius: '12px', border: '1px solid #444', padding: '20px', position: 'relative', overflowX: 'auto', flex: 1 }}>
             <div id="label-editor-waveform" ref={containerRef} style={{ minWidth: '100%' }} />
-            {selectedRegion && (
-                <div style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', background: '#222', padding: '12px', borderRadius: '12px', border: '1px solid #555', display: 'flex', gap: '8px', zIndex: 100, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}>
-                    <input value={editLabel} onChange={e => setEditLabel(e.target.value)} onKeyDown={e => { if(e.key === 'Enter') handleUpdateLabel(); if(e.key === 'Escape') setSelectedRegion(null); }} autoFocus style={{ background: '#000', border: '1px solid #444', color: '#fff', padding: '6px 10px', borderRadius: '6px', outline: 'none', width: '80px', fontWeight: 'bold' }} />
+            {selectedRegion && wavesurferRef.current && (
+                <div style={{ 
+                    position: 'absolute', 
+                    top: '10px', 
+                    left: `${((selectedRegion.start + selectedRegion.end) / 2 / (wavesurferRef.current.getDuration() || 1)) * 100}%`, 
+                    transform: 'translateX(-50%)', 
+                    background: '#222', 
+                    padding: '12px', 
+                    borderRadius: '12px', 
+                    border: '1px solid #555', 
+                    display: 'flex', 
+                    gap: '8px', 
+                    zIndex: 100, 
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)' 
+                }}>
+                    <input 
+                        value={editLabel} 
+                        onChange={e => setEditLabel(e.target.value.replace(/\\s+/g, ''))} 
+                        onKeyDown={e => { 
+                            if(e.key === 'Enter') handleUpdateLabel(); 
+                            if(e.key === 'Escape') setSelectedRegion(null); 
+                        }} 
+                        autoFocus 
+                        style={{ background: '#000', border: '1px solid #444', color: '#fff', padding: '6px 10px', borderRadius: '6px', outline: 'none', width: '80px', fontWeight: 'bold' }} 
+                    />
                     <button onClick={handleUpdateLabel} style={{ background: '#00e5ff', border: 'none', color: '#000', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>OK</button>
                     <button onClick={() => precisePlayRange(selectedRegion.start, selectedRegion.end)} style={{ background: '#ffea00', border: 'none', color: '#000', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>PLAY</button>
                     <button onClick={handleDeleteRegion} style={{ background: '#ff4444', border: 'none', color: '#fff', padding: '6px 14px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>DEL</button>
