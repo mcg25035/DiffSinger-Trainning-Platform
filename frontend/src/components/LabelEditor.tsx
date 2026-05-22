@@ -437,57 +437,75 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const allRegions = regionsRef.current.getRegions().sort((a, b) => a.start - b.start);
     const words = text.split(/\s+/).filter(w => w.length > 0);
     const labels = allRegions.map(r => r.content?.getAttribute('data-label-text') || '');
-    
+
     console.log(`[ALIGN-DBG] ===== runAlignment START =====`);
     console.log(`[ALIGN-DBG] lyrics words (${words.length}):`, words);
     console.log(`[ALIGN-DBG] all labels (${labels.length}):`, labels);
 
+    const SILENT_SET = new Set(['SP', 'PAU', 'BR', 'SIL', '!', 'CL']);
+    const isSilent = (l: string) => SILENT_SET.has(l.toUpperCase());
+
     const instances: WordInstance[] = [];
     let labelIdx = 0;
+    const totalWords = words.length;
 
     for (let wordIdx = 0; wordIdx < words.length; wordIdx++) {
       const word = words[wordIdx];
+
+      // Skip leading silent labels
       const labelIdxBeforeSkip = labelIdx;
-
-      while (labelIdx < labels.length) {
-        const l = labels[labelIdx].toUpperCase();
-        if (l === 'SP' || l === 'PAU' || l === 'BR' || l === 'SIL' || l === '!') {
-          labelIdx++;
-        } else {
-          break;
-        }
+      while (labelIdx < labels.length && isSilent(labels[labelIdx])) {
+        labelIdx++;
       }
-
       if (labelIdx !== labelIdxBeforeSkip) {
         console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": skipped ${labelIdx - labelIdxBeforeSkip} silent labels (idx ${labelIdxBeforeSkip}→${labelIdx})`);
       }
 
-      let currentCombined = '';
-      const group: string[] = [];
+      if (labelIdx >= labels.length) {
+        console.warn(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ⚠️ NO LABELS LEFT`);
+        continue;
+      }
+
       const startIdx = labelIdx;
+      const group: string[] = [];
+      let currentCombined = '';
 
       // Log nearby labels for context
       const nearbyStart = Math.max(0, labelIdx - 2);
       const nearbyEnd = Math.min(labels.length, labelIdx + 8);
       const nearbyLabels = labels.slice(nearbyStart, nearbyEnd).map((l, i) => `[${nearbyStart + i}]${l}`);
-      console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": trying to match starting at labelIdx=${labelIdx}, nearby labels: ${nearbyLabels.join(' ')}`);
+      console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": trying to match at labelIdx=${labelIdx}, nearby: ${nearbyLabels.join(' ')}`);
+
+      // Calculate how many non-silent phonemes this word should consume
+      // by distributing remaining non-silent labels evenly across remaining words
+      const remainingWords = totalWords - wordIdx;
+      const remainingNonSilent = labels.slice(labelIdx).filter(l => !isSilent(l)).length;
+      const expectedPhonemes = Math.max(1, Math.min(4, Math.round(remainingNonSilent / remainingWords)));
+
+      let nonSilentConsumed = 0;
+      let matchedExact = false;
 
       while (labelIdx < labels.length) {
         const label = labels[labelIdx];
-        const nextCombined = currentCombined + label;
+        // Stop at a silent boundary — this word ends here
+        if (isSilent(label)) break;
+
         group.push(label);
-        currentCombined = nextCombined;
+        currentCombined += label;
         labelIdx++;
-        
-        if (currentCombined.toLowerCase() === word.toLowerCase()) break;
-        if (group.length > 5 || currentCombined.length > word.length + 5) {
-            // Prevent consuming too many labels if alignment completely fails
-            console.warn(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ⚠️ MATCH FAILED! combined="${currentCombined}" (${group.length} labels consumed: [${group.join(', ')}]), bailing out`);
-            break; 
+        nonSilentConsumed++;
+
+        // Fast path: exact string match
+        if (currentCombined.toLowerCase() === word.toLowerCase()) {
+          matchedExact = true;
+          break;
         }
+        // Proportional stop: consumed expected number of phonemes for this word
+        if (nonSilentConsumed >= expectedPhonemes) break;
+        // Hard cap
+        if (nonSilentConsumed >= 6) break;
       }
 
-      const matched = currentCombined.toLowerCase() === word.toLowerCase();
       if (group.length > 0 && startIdx < allRegions.length) {
         const inst = {
           word,
@@ -496,15 +514,15 @@ export function LabelEditor({ recording, onCancel }: Props) {
           phonemes: [...group]
         };
         instances.push(inst);
-        console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ${matched ? '✅ MATCHED' : '❌ MISMATCH'} combined="${currentCombined}" phonemes=[${group.join(', ')}] range=${inst.start.toFixed(3)}-${inst.end.toFixed(3)}`);
+        console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ${matchedExact ? '✅ EXACT' : '📐 PROPORTIONAL'} combined="${currentCombined}" phonemes=[${group.join(',')}] range=${inst.start.toFixed(3)}-${inst.end.toFixed(3)} (expected=${expectedPhonemes} consumed=${nonSilentConsumed})`);
       } else {
-        console.warn(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ⚠️ NO LABELS LEFT (startIdx=${startIdx}, total=${allRegions.length})`);
+        console.warn(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ⚠️ NO LABELS (startIdx=${startIdx}, total=${allRegions.length})`);
       }
     }
 
     if (labelIdx < labels.length) {
       const remaining = labels.slice(labelIdx);
-      console.log(`[ALIGN-DBG] ⚠️ ${remaining.length} unused labels remaining after alignment: [${remaining.join(', ')}]`);
+      console.log(`[ALIGN-DBG] ⚠️ ${remaining.length} unused labels after alignment: [${remaining.join(', ')}]`);
     }
 
     console.log(`[ALIGN-DBG] ===== runAlignment END: ${instances.length} word instances =====`);
