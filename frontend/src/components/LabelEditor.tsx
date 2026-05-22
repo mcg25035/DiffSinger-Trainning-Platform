@@ -438,10 +438,17 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const words = text.split(/\s+/).filter(w => w.length > 0);
     const labels = allRegions.map(r => r.content?.getAttribute('data-label-text') || '');
     
+    console.log(`[ALIGN-DBG] ===== runAlignment START =====`);
+    console.log(`[ALIGN-DBG] lyrics words (${words.length}):`, words);
+    console.log(`[ALIGN-DBG] all labels (${labels.length}):`, labels);
+
     const instances: WordInstance[] = [];
     let labelIdx = 0;
 
-    for (const word of words) {
+    for (let wordIdx = 0; wordIdx < words.length; wordIdx++) {
+      const word = words[wordIdx];
+      const labelIdxBeforeSkip = labelIdx;
+
       while (labelIdx < labels.length) {
         const l = labels[labelIdx].toUpperCase();
         if (l === 'SP' || l === 'PAU' || l === 'BR' || l === 'SIL' || l === '!') {
@@ -451,9 +458,19 @@ export function LabelEditor({ recording, onCancel }: Props) {
         }
       }
 
+      if (labelIdx !== labelIdxBeforeSkip) {
+        console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": skipped ${labelIdx - labelIdxBeforeSkip} silent labels (idx ${labelIdxBeforeSkip}→${labelIdx})`);
+      }
+
       let currentCombined = '';
       const group: string[] = [];
       const startIdx = labelIdx;
+
+      // Log nearby labels for context
+      const nearbyStart = Math.max(0, labelIdx - 2);
+      const nearbyEnd = Math.min(labels.length, labelIdx + 8);
+      const nearbyLabels = labels.slice(nearbyStart, nearbyEnd).map((l, i) => `[${nearbyStart + i}]${l}`);
+      console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": trying to match starting at labelIdx=${labelIdx}, nearby labels: ${nearbyLabels.join(' ')}`);
 
       while (labelIdx < labels.length) {
         const label = labels[labelIdx];
@@ -465,19 +482,32 @@ export function LabelEditor({ recording, onCancel }: Props) {
         if (currentCombined.toLowerCase() === word.toLowerCase()) break;
         if (group.length > 5 || currentCombined.length > word.length + 5) {
             // Prevent consuming too many labels if alignment completely fails
+            console.warn(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ⚠️ MATCH FAILED! combined="${currentCombined}" (${group.length} labels consumed: [${group.join(', ')}]), bailing out`);
             break; 
         }
       }
 
+      const matched = currentCombined.toLowerCase() === word.toLowerCase();
       if (group.length > 0 && startIdx < allRegions.length) {
-        instances.push({
+        const inst = {
           word,
           start: allRegions[startIdx].start,
           end: allRegions[Math.min(labelIdx - 1, allRegions.length - 1)].end,
           phonemes: [...group]
-        });
+        };
+        instances.push(inst);
+        console.log(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ${matched ? '✅ MATCHED' : '❌ MISMATCH'} combined="${currentCombined}" phonemes=[${group.join(', ')}] range=${inst.start.toFixed(3)}-${inst.end.toFixed(3)}`);
+      } else {
+        console.warn(`[ALIGN-DBG]   word[${wordIdx}]="${word}": ⚠️ NO LABELS LEFT (startIdx=${startIdx}, total=${allRegions.length})`);
       }
     }
+
+    if (labelIdx < labels.length) {
+      const remaining = labels.slice(labelIdx);
+      console.log(`[ALIGN-DBG] ⚠️ ${remaining.length} unused labels remaining after alignment: [${remaining.join(', ')}]`);
+    }
+
+    console.log(`[ALIGN-DBG] ===== runAlignment END: ${instances.length} word instances =====`);
     setWordInstances(instances);
   };
 
@@ -846,12 +876,21 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
     const time = ws.getCurrentTime();
     
+    console.log(`[PLAY-WORD-DBG] cursor time=${time.toFixed(3)}, wordInstances count=${wordInstances.length}`);
+    if (wordInstances.length > 0) {
+      console.log(`[PLAY-WORD-DBG] all word instances:`, wordInstances.map((w, i) => `[${i}] "${w.word}" ${w.start.toFixed(3)}-${w.end.toFixed(3)} phonemes=[${w.phonemes.join(',')}]`));
+    }
+
     let word = wordInstances.find(w => time >= w.start && time < w.end)
             || wordInstances.find(w => time >= w.start && time <= w.end);
               
     if (word) {
-      console.log(`[PLAY-WORD] ${word.word} @ ${word.start}-${word.end}`);
+      console.log(`[PLAY-WORD] ▶ "${word.word}" @ ${word.start.toFixed(3)}-${word.end.toFixed(3)} phonemes=[${word.phonemes.join(',')}]`);
       precisePlayRange(word.start, word.end);
+    } else {
+      console.warn(`[PLAY-WORD-DBG] ⚠️ No word found at time=${time.toFixed(3)}! Nearby words:`);
+      const nearby = wordInstances.filter(w => Math.abs(w.start - time) < 2 || Math.abs(w.end - time) < 2);
+      nearby.forEach((w, i) => console.warn(`  [${i}] "${w.word}" ${w.start.toFixed(3)}-${w.end.toFixed(3)}`));
     }
   };
 
