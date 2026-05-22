@@ -861,7 +861,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
       const all = regionsRef.current.getRegions();
       all.forEach(r => {
           if (r.element) {
-              let arrow = r.element.querySelector('.region-selected-arrow');
+              let arrow = r.element.querySelector('.region-selected-arrow') as HTMLElement | null;
               if (selectedRegion && r.id === selectedRegion.id) {
                   if (!arrow) {
                       arrow = document.createElement('div');
