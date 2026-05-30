@@ -1,6 +1,7 @@
 dictionaries
 node_modules
 upload_segments
+upload_chunks
 uploads
 .env
 .ds_trusted
@@ -13,3 +14,4 @@ find_c.py
 fix_lab.py
 check_coverage.py
 update_verify.py
+dev.log
