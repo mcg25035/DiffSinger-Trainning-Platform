@@ -1,0 +1,398 @@
+/* ============================================
+   LabelEditor.css — Visual Labeler 樣式
+   ============================================ */
+
+/* ── Layout ── */
+
+.label-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.label-editor__main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.label-editor__panel {
+  background: #000;
+  border-radius: 12px;
+  border: 1px solid #444;
+  padding: 20px;
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.label-editor__waveform-container {
+  flex: 1;
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 10px;
+}
+
+.label-editor__waveform {
+  min-width: 100%;
+}
+
+.label-editor__bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  border-top: 1px solid #333;
+  padding-top: 10px;
+}
+
+/* ── Toolbar ── */
+
+.label-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.label-toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.label-toolbar__right {
+  display: flex;
+  gap: 12px;
+}
+
+.label-toolbar__title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.label-toolbar__title {
+  font-size: 20px;
+  margin: 0;
+  font-weight: 800;
+  color: #fff;
+}
+
+.label-toolbar__save-icon {
+  display: flex;
+  align-items: center;
+  transition: all 0.3s;
+}
+
+.label-toolbar__save-icon--idle {
+  color: #888;
+}
+
+.label-toolbar__save-icon--saving {
+  color: #ffea00;
+}
+
+.label-toolbar__save-icon--saved {
+  color: #00e676;
+}
+
+.label-toolbar__save-icon--error {
+  color: #ff4444;
+}
+
+.label-toolbar__play-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Buttons ── */
+
+.label-toolbar__btn {
+  background: #222;
+  border: 1px solid #444;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+.label-toolbar__btn:hover:not(:disabled) {
+  filter: brightness(1.2);
+}
+
+.label-toolbar__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.label-toolbar__btn--word {
+  border-color: #00e5ff;
+}
+
+.label-toolbar__btn--phoneme {
+  border-color: #ffea00;
+}
+
+.label-toolbar__btn--full {
+  border-color: #666;
+}
+
+.label-toolbar__btn--playing {
+  color: #00e676;
+}
+
+.label-toolbar__btn--cancel {
+  background: #333;
+  border: none;
+  padding: 10px 20px;
+}
+
+.label-toolbar__btn--save {
+  background: #fff;
+  border: none;
+  color: #000;
+  padding: 10px 20px;
+}
+
+/* ── Sliders ── */
+
+.label-toolbar__controls {
+  font-size: 12px;
+  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.label-toolbar__slider-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.label-toolbar__slider-label {
+  font-size: 10px;
+  font-weight: bold;
+}
+
+.label-toolbar__slider {
+  width: 80px;
+}
+
+.label-toolbar__slider--zoom {
+  accent-color: #00e5ff;
+}
+
+.label-toolbar__slider--speed {
+  accent-color: #ffea00;
+}
+
+.label-toolbar__speed-value {
+  min-width: 30px;
+}
+
+.label-toolbar__status {
+  /* inherit */
+}
+
+.label-toolbar__error {
+  color: #ff4444;
+}
+
+/* ── Phoneme Edit Panel ── */
+
+.phoneme-edit {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phoneme-edit__hint {
+  color: #888;
+  font-style: italic;
+}
+
+.phoneme-edit__label {
+  color: #fff;
+  font-weight: bold;
+}
+
+.phoneme-edit__input {
+  background: #222;
+  border: 1px solid #444;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  outline: none;
+  width: 120px;
+  font-weight: bold;
+}
+
+.phoneme-edit__input:focus {
+  border-color: #00e5ff;
+}
+
+.phoneme-edit__btn {
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.phoneme-edit__btn:hover {
+  filter: brightness(1.15);
+}
+
+.phoneme-edit__btn--ok {
+  background: #00e5ff;
+  color: #000;
+}
+
+.phoneme-edit__btn--play {
+  background: #ffea00;
+  color: #000;
+}
+
+.phoneme-edit__btn--del {
+  background: #ff4444;
+  color: #fff;
+}
+
+.phoneme-edit__btn--close {
+  background: #444;
+  color: #fff;
+  padding: 6px 10px;
+}
+
+.phoneme-edit__divider {
+  width: 1px;
+  background: #444;
+  margin: 0 4px;
+  height: 20px;
+}
+
+/* ── Region Button Track ── */
+
+.region-track {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #444 #000;
+}
+
+.region-track__btn {
+  background: #222;
+  color: #fff;
+  border: 1px solid #444;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-weight: bold;
+  transition: all 0.15s;
+}
+
+.region-track__btn:hover {
+  filter: brightness(1.2);
+}
+
+.region-track__btn--selected {
+  background: #00e5ff;
+  color: #000;
+}
+
+.region-track__btn--playing {
+  border-bottom: 3px solid #ffea00 !important;
+  box-shadow: 0 0 8px rgba(255, 234, 0, 0.7) !important;
+}
+
+/* ── WaveSurfer Region Overrides ── */
+
+#label-editor-waveform ::part(region) {
+  border-left: 1px solid var(--region-border-color, rgba(255,255,255,0.3)) !important;
+  border-right: 1px solid rgba(255,255,255,0.05) !important;
+  transition: border-left-color 0.2s ease;
+}
+
+#label-editor-waveform ::part(region-handle) {
+  width: 8px !important;
+}
+
+/* ── Spin animation ── */
+
+.label-toolbar__spin {
+  animation: label-editor-spin 2s linear infinite;
+}
+
+@keyframes label-editor-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Fullscreen Mode ── */
+
+.label-editor.label-editor--fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
+  background-color: #0f0f0f;
+  padding: 24px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.label-toolbar--fullscreen-mode {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #333;
+  margin-bottom: 10px;
+}
+
+/* ── Fullscreen & Exit Button Premium Styles ── */
+
+.label-toolbar__btn--exit {
+  background: rgba(255, 68, 68, 0.1) !important;
+  border: 1px solid rgba(255, 68, 68, 0.4) !important;
+  color: #ff8888 !important;
+  font-size: 13px !important;
+}
+
+.label-toolbar__btn--exit:hover {
+  background: rgba(255, 68, 68, 0.25) !important;
+  border-color: rgba(255, 68, 68, 0.8) !important;
+  color: #fff !important;
+}
+
+.label-toolbar__btn--fullscreen {
+  background: rgba(0, 229, 255, 0.05) !important;
+  border: 1px solid rgba(0, 229, 255, 0.4) !important;
+  color: #00e5ff !important;
+  font-size: 13px !important;
+}
+
+.label-toolbar__btn--fullscreen:hover {
+  background: rgba(0, 229, 255, 0.2) !important;
+  border-color: rgba(0, 229, 255, 0.8) !important;
+  color: #fff !important;
+}
