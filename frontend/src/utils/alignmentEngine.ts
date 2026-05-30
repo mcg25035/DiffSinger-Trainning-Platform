@@ -80,7 +80,6 @@ export function alignLyricsToLabels(
     );
 
     let nonSilentConsumed = 0;
-    let matchedExact = false;
 
     while (labelIdx < labels.length) {
       const label = labelTexts[labelIdx];
@@ -94,7 +93,6 @@ export function alignLyricsToLabels(
 
       // 精確匹配
       if (currentCombined.toLowerCase() === word.toLowerCase()) {
-        matchedExact = true;
         break;
       }
       // 比例分配停止

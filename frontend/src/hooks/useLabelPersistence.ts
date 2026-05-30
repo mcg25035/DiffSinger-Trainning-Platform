@@ -7,7 +7,7 @@
  *  - 管理 isDirty / saveStatus 狀態
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import type { Recording } from './useAudioMonitor';
 import {
   parseLab,

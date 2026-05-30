@@ -2,7 +2,6 @@
  * LabelToolbar — Visual Labeler 頂部工具列
  */
 
-import type { UseAudioPlaybackReturn } from '../../hooks/useAudioPlayback';
 
 interface Props {
   isLoaded: boolean;

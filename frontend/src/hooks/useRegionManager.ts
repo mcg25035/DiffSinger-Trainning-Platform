@@ -14,7 +14,6 @@ import { useState, useRef, useCallback } from 'react';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 import type RegionsPlugin from 'wavesurfer.js/plugins/regions';
 import type { LabSegment } from '../utils/labParser';
-import { stringifyLabSegments } from '../utils/labParser';
 import {
   createLabelElement,
   applyRegionStyle,

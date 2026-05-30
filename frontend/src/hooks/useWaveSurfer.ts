@@ -8,7 +8,7 @@
  *  - 暴露 regions ref 給其他 hooks 使用
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import RegionsPlugin from 'wavesurfer.js/plugins/regions';
 import Spectrogram from 'wavesurfer.js/plugins/spectrogram';
