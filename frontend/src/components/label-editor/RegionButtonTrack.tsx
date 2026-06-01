@@ -1,9 +1,10 @@
 /**
- * RegionButtonTrack — 水平捲動的 region 按鈕列表
+ * RegionButtonTrack — 水平捲動的 region 按鈕列表與單詞歸屬下拉選單
  */
 
 import type WaveSurfer from 'wavesurfer.js';
 import type { RegionItem } from '../../hooks/useRegionManager';
+import { isSilentLabel, getValidWordIndexRange } from '../../utils/alignmentEngine';
 
 interface Props {
   items: RegionItem[];
@@ -11,6 +12,8 @@ interface Props {
   onSelect: (item: RegionItem) => void;
   wavesurferRef: React.MutableRefObject<WaveSurfer | null>;
   activePlayRange?: { start: number; end: number } | null;
+  lyrics: string;
+  onWordIndexChange: (regionId: string, wordIndex: number | undefined) => void;
 }
 
 export function RegionButtonTrack({
@@ -19,7 +22,11 @@ export function RegionButtonTrack({
   onSelect,
   wavesurferRef,
   activePlayRange,
+  lyrics,
+  onWordIndexChange,
 }: Props) {
+  const words = lyrics.split(/\s+/).filter((w) => w.length > 0);
+
   const handleClick = (item: RegionItem) => {
     onSelect(item);
 
@@ -41,22 +48,47 @@ export function RegionButtonTrack({
 
   return (
     <div className="region-track">
-      {items.map((item) => {
+      {items.map((item, idx) => {
         const isPlayingThis =
           activePlayRange &&
           item.region.start < activePlayRange.end &&
           item.region.end > activePlayRange.start;
 
+        const currentWordIndex = item.wordIndex !== undefined ? item.wordIndex : -1;
+        const isSilent = isSilentLabel(item.label);
+        const { minIdx, maxIdx } = getValidWordIndexRange(items, idx, words.length);
+
         return (
-          <button
-            key={item.id}
-            onClick={() => handleClick(item)}
-            className={`region-track__btn ${
-              selectedId === item.id ? 'region-track__btn--selected' : ''
-            } ${isPlayingThis ? 'region-track__btn--playing' : ''}`}
-          >
-            {item.label || 'SP'}
-          </button>
+          <div key={item.id} className="region-track__col">
+            <button
+              onClick={() => handleClick(item)}
+              className={`region-track__btn ${
+                selectedId === item.id ? 'region-track__btn--selected' : ''
+              } ${isPlayingThis ? 'region-track__btn--playing' : ''}`}
+            >
+              {item.label || 'SP'}
+            </button>
+            <select
+              value={currentWordIndex}
+              disabled={isSilent}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                onWordIndexChange(item.id, val === -1 ? undefined : val);
+              }}
+              className="region-track__select"
+            >
+              <option value={-1}>-</option>
+              {!isSilent &&
+                words.map((word, wIdx) => {
+                  const isDisabled = wIdx < minIdx || wIdx > maxIdx;
+                  return (
+                    <option key={wIdx} value={wIdx} disabled={isDisabled}>
+                      {wIdx + 1}. {word}
+                    </option>
+                  );
+                })}
+            </select>
+          </div>
         );
       })}
     </div>

@@ -292,37 +292,74 @@
 
 .region-track {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   overflow-x: auto;
-  padding-bottom: 8px;
+  padding-bottom: 12px;
   scrollbar-width: thin;
-  scrollbar-color: #444 #000;
+  scrollbar-color: #555 #111;
+  align-items: flex-start;
+}
+
+.region-track__col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 70px;
 }
 
 .region-track__btn {
   background: #222;
   color: #fff;
   border: 1px solid #444;
-  padding: 6px 12px;
+  padding: 8px 12px;
   border-radius: 4px;
   cursor: pointer;
   white-space: nowrap;
   font-weight: bold;
   transition: all 0.15s;
+  text-align: center;
 }
 
 .region-track__btn:hover {
-  filter: brightness(1.2);
+  background: #333;
+  border-color: #555;
 }
 
 .region-track__btn--selected {
   background: #00e5ff;
   color: #000;
+  border-color: #00b2cc;
 }
 
 .region-track__btn--playing {
   border-bottom: 3px solid #ffea00 !important;
   box-shadow: 0 0 8px rgba(255, 234, 0, 0.7) !important;
+}
+
+.region-track__select {
+  background: #111;
+  color: #ccc;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s;
+  text-align-last: center;
+}
+
+.region-track__select:hover {
+  background: #1a1a1a;
+  border-color: #555;
+  color: #fff;
+}
+
+.region-track__select:focus {
+  border-color: #00e5ff;
+  color: #fff;
+  box-shadow: 0 0 4px rgba(0, 229, 255, 0.4);
 }
 
 /* ── WaveSurfer Region Overrides ── */

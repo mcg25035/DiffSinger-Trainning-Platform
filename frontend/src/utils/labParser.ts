@@ -13,6 +13,7 @@ export interface LabSegment {
   end: number;
   label: string;
   score?: number;
+  wordIndex?: number;
 }
 
 /**
@@ -59,8 +60,9 @@ export function stringifyLabSegments(segments: LabSegment[]): string {
   const lines: string[] = [];
 
   for (let i = 0; i < sorted.length; i++) {
-    const s = Math.round(sorted[i].start * 10000000);
-    let e = Math.round(sorted[i].end * 10000000);
+    const seg = sorted[i];
+    const s = Math.round(seg.start * 10000000);
+    let e = Math.round(seg.end * 10000000);
 
     // 相鄰 segment 邊界修正：prev.end = next.start - 1（整數域）
     if (i < sorted.length - 1) {
@@ -70,7 +72,11 @@ export function stringifyLabSegments(segments: LabSegment[]): string {
       }
     }
 
-    lines.push(`${s} ${e} ${sorted[i].label}`);
+    if (seg.score !== undefined) {
+      lines.push(`${s} ${e} ${seg.label} ${seg.score.toFixed(4)}`);
+    } else {
+      lines.push(`${s} ${e} ${seg.label}`);
+    }
   }
 
   return lines.join('\n');

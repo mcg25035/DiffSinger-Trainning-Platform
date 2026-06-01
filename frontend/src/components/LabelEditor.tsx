@@ -26,6 +26,7 @@ import { useLyricsAlignment } from '../hooks/useLyricsAlignment';
 import { useLabelPersistence } from '../hooks/useLabelPersistence';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { getRegionLabel } from '../utils/regionStyle';
+import { loadWordAlignmentMap } from '../utils/alignmentStorage';
 import { LabelToolbar } from './label-editor/LabelToolbar';
 import { PhonemeEditPanel } from './label-editor/PhonemeEditPanel';
 import { RegionButtonTrack } from './label-editor/RegionButtonTrack';
@@ -61,14 +62,18 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
       // 如果當前 React state 中已有編輯中的 segments，我們直接載入，不讀取 API，以保持未存檔進度與 undoStack
       if (currentSegments.length > 0) {
+        loadWordAlignmentMap(recording.filename, currentSegments);
         regionMgr.renderSegments(currentSegments, regions);
         alignment.runAlignment();
+        regionMgr.refreshRegionsState();
       } else {
         // 第一次載入，自 API 讀取
         persistence.loadLabels(duration).then((segments) => {
           if (segments.length > 0) {
+            loadWordAlignmentMap(recording.filename, segments);
             regionMgr.loadRegions(segments, regions);
             alignment.runAlignment();
+            regionMgr.refreshRegionsState();
           }
         });
       }
@@ -126,12 +131,13 @@ export function LabelEditor({ recording, onCancel }: Props) {
   const regionMgr = useRegionManager(wavesurfer.regionsRef, () => {
     // onChange callback: region 變更後重新對齊
     alignment.runAlignment();
+    regionMgr.refreshRegionsState();
     persistence.setIsDirty(true);
     persistence.setSaveStatus('idle');
   });
 
   // ── 歌詞對齊 ──
-  const alignment = useLyricsAlignment(wavesurfer.regionsRef, lyrics);
+  const alignment = useLyricsAlignment(wavesurfer.regionsRef, lyrics, recording.filename);
 
   // ── 存檔 / 載入 ──
   const persistence = useLabelPersistence(recording);
@@ -189,6 +195,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
   useEffect(() => {
     if (wavesurfer.isLoaded) {
       alignment.runAlignment();
+      regionMgr.refreshRegionsState();
     }
   }, [wavesurfer.isLoaded, regionMgr.labelsCount]);
 
@@ -405,6 +412,8 @@ export function LabelEditor({ recording, onCancel }: Props) {
                 regionMgr.setEditLabel(item.label);
               }}
               wavesurferRef={wavesurfer.wavesurferRef}
+              lyrics={lyrics}
+              onWordIndexChange={regionMgr.updateRegionWordIndex}
             />
           </div>
         </div>

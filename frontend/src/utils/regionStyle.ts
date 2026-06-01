@@ -57,7 +57,8 @@ export function applyRegionStyle(
   region: Region,
   label: string,
   level: number,
-  score?: number
+  score?: number,
+  wordIndex?: number
 ): void {
   const isWarning = label === '!';
   const confColor = getConfidenceColor(score);
@@ -76,6 +77,13 @@ export function applyRegionStyle(
     region.element.style.setProperty('--region-border-color', confColor);
     if (score !== undefined) {
       region.element.setAttribute('data-label-score', score.toString());
+    } else {
+      region.element.removeAttribute('data-label-score');
+    }
+    if (wordIndex !== undefined) {
+      region.element.setAttribute('data-label-word-index', wordIndex.toString());
+    } else {
+      region.element.removeAttribute('data-label-word-index');
     }
   }
 }
@@ -95,4 +103,14 @@ export function getRegionScore(region: Region): number | undefined {
     region.element?.getAttribute('data-label-score') ||
     region.content?.getAttribute('data-label-score');
   return scoreAttr ? parseFloat(scoreAttr) : undefined;
+}
+
+/**
+ * 從 region 讀取 Word Index
+ */
+export function getRegionWordIndex(region: Region): number | undefined {
+  const wordIndexAttr =
+    region.element?.getAttribute('data-label-word-index') ||
+    region.content?.getAttribute('data-label-word-index');
+  return wordIndexAttr ? parseInt(wordIndexAttr, 10) : undefined;
 }

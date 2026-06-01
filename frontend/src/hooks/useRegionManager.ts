@@ -19,12 +19,14 @@ import {
   applyRegionStyle,
   getRegionLabel,
   getRegionScore,
+  getRegionWordIndex,
 } from '../utils/regionStyle';
 
 export interface RegionItem {
   id: string;
   label: string;
   region: Region;
+  wordIndex?: number;
 }
 
 export interface UseRegionManagerReturn {
@@ -46,6 +48,7 @@ export interface UseRegionManagerReturn {
   refreshRegionsState: () => void;
   undo: () => void;
   saveHistory: () => void;
+  updateRegionWordIndex: (regionId: string, wordIndex: number | undefined) => void;
   /** 取得當前所有 regions 的 LabSegment 表示 */
   getCurrentSegments: () => LabSegment[];
 }
@@ -75,6 +78,7 @@ export function useRegionManager(
         id: r.id,
         label: getRegionLabel(r),
         region: r,
+        wordIndex: getRegionWordIndex(r),
       }))
     );
 
@@ -84,6 +88,7 @@ export function useRegionManager(
       end: r.end,
       label: getRegionLabel(r),
       score: getRegionScore(r),
+      wordIndex: getRegionWordIndex(r),
     }));
   }, [regionsRef]);
 
@@ -122,7 +127,7 @@ export function useRegionManager(
           drag: false,
           resize: true,
         });
-        if (reg) applyRegionStyle(reg, seg.label, level, seg.score);
+        if (reg) applyRegionStyle(reg, seg.label, level, seg.score, seg.wordIndex);
       });
       isUpdatingRef.current = false;
       refreshRegionsState();
@@ -149,14 +154,37 @@ export function useRegionManager(
     const idx = all.indexOf(selectedRegion);
     const level = idx !== -1 ? idx % 2 : 0;
     const score = getRegionScore(selectedRegion);
+    const wordIndex = getRegionWordIndex(selectedRegion);
 
     selectedRegion.setOptions({
       content: createLabelElement(editLabel, level),
     });
-    applyRegionStyle(selectedRegion, editLabel, level, score);
+    applyRegionStyle(selectedRegion, editLabel, level, score, wordIndex);
 
     commitChange();
   }, [selectedRegion, editLabel, regionsRef, commitChange]);
+
+  // 更新選中 region 的 wordIndex
+  const updateRegionWordIndex = useCallback((regionId: string, wordIndex: number | undefined) => {
+    if (!regionsRef.current) return;
+    const all = regionsRef.current.getRegions();
+    const region = all.find((r) => r.id === regionId);
+    if (!region) return;
+
+    const allSorted = [...all].sort((a, b) => a.start - b.start);
+    const idx = allSorted.indexOf(region);
+    const level = idx !== -1 ? idx % 2 : 0;
+    const label = getRegionLabel(region);
+    const score = getRegionScore(region);
+
+    applyRegionStyle(region, label, level, score, wordIndex);
+
+    if (selectedRegion && selectedRegion.id === regionId) {
+      setSelectedRegion(region);
+    }
+
+    commitChange();
+  }, [regionsRef, selectedRegion, commitChange]);
 
   // 刪除選中的 region
   const deleteSelected = useCallback(() => {
@@ -185,7 +213,8 @@ export function useRegionManager(
       const level = i % 2;
       const label = getRegionLabel(r);
       const score = getRegionScore(r);
-      applyRegionStyle(r, label, level, score);
+      const wordIndex = getRegionWordIndex(r);
+      applyRegionStyle(r, label, level, score, wordIndex);
     });
 
     commitChange();
@@ -207,6 +236,7 @@ export function useRegionManager(
       const oldEnd = target.end;
       const oldLabel = getRegionLabel(target);
       const oldScore = getRegionScore(target);
+      const oldWordIndex = getRegionWordIndex(target);
 
       isUpdatingRef.current = true;
       target.setOptions({ end: time });
@@ -217,7 +247,7 @@ export function useRegionManager(
         drag: false,
         resize: true,
       });
-      if (newReg) applyRegionStyle(newReg, oldLabel, 0, oldScore);
+      if (newReg) applyRegionStyle(newReg, oldLabel, 0, oldScore, oldWordIndex);
 
       isUpdatingRef.current = false;
 
@@ -229,7 +259,8 @@ export function useRegionManager(
         const level = idx % 2;
         const label = getRegionLabel(r);
         const score = getRegionScore(r);
-        applyRegionStyle(r, label, level, score);
+        const wordIndex = getRegionWordIndex(r);
+        applyRegionStyle(r, label, level, score, wordIndex);
       });
 
       commitChange();
@@ -286,7 +317,7 @@ export function useRegionManager(
         drag: false,
         resize: true,
       });
-      if (reg) applyRegionStyle(reg, seg.label, level, seg.score);
+      if (reg) applyRegionStyle(reg, seg.label, level, seg.score, seg.wordIndex);
     });
     isUpdatingRef.current = false;
 
@@ -308,6 +339,7 @@ export function useRegionManager(
     loadRegions,
     renderSegments,
     updateLabel,
+    updateRegionWordIndex,
     deleteSelected,
     splitAtTime,
     handleRegionUpdated,
@@ -330,6 +362,8 @@ function stringifyFromRegions(regions: Region[]): string {
     const s = Math.round(sorted[i].start * 10000000);
     let e = Math.round(sorted[i].end * 10000000);
     const label = getRegionLabel(sorted[i]);
+    const score = getRegionScore(sorted[i]);
+    const wordIndex = getRegionWordIndex(sorted[i]);
 
     // 相鄰邊界修正：prev.end = next.start - 1（整數域）
     if (i < sorted.length - 1) {
@@ -339,7 +373,16 @@ function stringifyFromRegions(regions: Region[]): string {
       }
     }
 
-    lines.push(`${s} ${e} ${label}`);
+    const scoreVal = score !== undefined ? score : 1.0;
+    const wordIdxVal = wordIndex !== undefined ? wordIndex : '';
+
+    if (wordIdxVal !== '') {
+      lines.push(`${s} ${e} ${label} ${scoreVal.toFixed(4)} ${wordIdxVal}`);
+    } else if (score !== undefined) {
+      lines.push(`${s} ${e} ${label} ${scoreVal.toFixed(4)}`);
+    } else {
+      lines.push(`${s} ${e} ${label}`);
+    }
   }
 
   return lines.join('\n');
@@ -361,7 +404,21 @@ function parseLabFromString(content: string): LabSegment[] {
         start /= 10000000;
         end /= 10000000;
       }
-      return { start, end, label } as LabSegment;
+      let score: number | undefined = undefined;
+      if (parts.length >= 4) {
+        const parsedScore = parseFloat(parts[3]);
+        if (!isNaN(parsedScore)) {
+          score = parsedScore;
+        }
+      }
+      let wordIndex: number | undefined = undefined;
+      if (parts.length >= 5) {
+        const parsedIdx = parseInt(parts[4], 10);
+        if (!isNaN(parsedIdx)) {
+          wordIndex = parsedIdx;
+        }
+      }
+      return { start, end, label, score, wordIndex } as LabSegment;
     })
     .filter((s): s is LabSegment => s !== null);
 }
