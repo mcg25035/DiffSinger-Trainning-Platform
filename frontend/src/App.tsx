@@ -34,13 +34,12 @@ const Header = memo(({ status }: { status: { text: string, color: string } }) =>
   </div>
 ));
 
-const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefresh, activeFilename }: { 
+const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefresh }: { 
   rawRecordings: Recording[], 
   uploadSegments: Recording[], 
   onSplit: (rec: Recording) => void,
   onLabel: (rec: Recording) => void,
-  onRefresh: () => void,
-  activeFilename?: string
+  onRefresh: () => void
 }) => {
   const [dictionaries, setDictionaries] = useState<Dictionary[]>([]);
   const [selectedDictId, setSelectedDictId] = useState<string>('');
@@ -128,7 +127,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
            Raw Recordings ({rawRecordings.length})
          </h2>
          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-           <RecordingList recordings={rawRecordings} onSplit={onSplit} onLabel={onLabel} onRefresh={onRefresh} activeFilename={activeFilename} />
+           <RecordingList recordings={rawRecordings} onSplit={onSplit} onLabel={onLabel} onRefresh={onRefresh} />
          </div>
       </div>
       <div style={{ height: '1px', background: '#333' }} />
@@ -137,7 +136,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
            Upload Segments ({uploadSegments.length})
          </h2>
          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-           <RecordingList recordings={uploadSegments} onLabel={onLabel} onRefresh={onRefresh} phonemeSet={phonemeSet} dictionaryId={selectedDictId} activeFilename={activeFilename} />
+           <RecordingList recordings={uploadSegments} onLabel={onLabel} onRefresh={onRefresh} phonemeSet={phonemeSet} dictionaryId={selectedDictId} />
          </div>
       </div>
     </div>
@@ -289,7 +288,6 @@ function App() {
           onSplit={handleSetSplit} 
           onLabel={handleSetLabeling}
           onRefresh={refreshRecordings}
-          activeFilename={selectedForLabeling?.filename || selectedForSplit?.filename}
         />
 
       </div>

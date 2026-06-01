@@ -27,7 +27,6 @@ interface Props {
   // Fullscreen
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
-  filename?: string;
 }
 
 export function LabelToolbar({
@@ -49,7 +48,6 @@ export function LabelToolbar({
   onCancel,
   isFullscreen = false,
   onToggleFullscreen,
-  filename,
 }: Props) {
   const disabled = !isLoaded || !isAudioLoaded;
 
@@ -119,7 +117,7 @@ export function LabelToolbar({
     <div className="label-toolbar">
       <div className="label-toolbar__left">
         <div className="label-toolbar__title-group">
-          <h2 className="label-toolbar__title">{filename || 'VISUAL LABELER'}</h2>
+          <h2 className="label-toolbar__title">VISUAL LABELER</h2>
           {renderCloudIcon()}
         </div>
 

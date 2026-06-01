@@ -363,7 +363,6 @@ export function LabelEditor({ recording, onCancel }: Props) {
         onCancel={handleCancel}
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
-        filename={recording.filename}
       />
 
       <div className="label-editor__main">
