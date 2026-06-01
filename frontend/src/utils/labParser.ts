@@ -55,14 +55,25 @@ export function parseLab(content: string): LabSegment[] {
  * 將 LabSegment 陣列序列化為 .lab 文字 (HTK 格式輸出)
  */
 export function stringifyLabSegments(segments: LabSegment[]): string {
-  return segments
-    .sort((a, b) => a.start - b.start)
-    .map((seg) => {
-      const s = Math.round(seg.start * 10000000);
-      const e = Math.round(seg.end * 10000000);
-      return `${s} ${e} ${seg.label}`;
-    })
-    .join('\n');
+  const sorted = [...segments].sort((a, b) => a.start - b.start);
+  const lines: string[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const s = Math.round(sorted[i].start * 10000000);
+    let e = Math.round(sorted[i].end * 10000000);
+
+    // 相鄰 segment 邊界修正：prev.end = next.start - 1（整數域）
+    if (i < sorted.length - 1) {
+      const nextStart = Math.round(sorted[i + 1].start * 10000000);
+      if (e >= nextStart) {
+        e = nextStart - 1;
+      }
+    }
+
+    lines.push(`${s} ${e} ${sorted[i].label}`);
+  }
+
+  return lines.join('\n');
 }
 
 /**

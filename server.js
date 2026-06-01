@@ -464,6 +464,64 @@ app.post('/api/lab/:filename', express.text({ type: '*/*' }), (req, res) => {
     res.json({ success: true });
 });
 
+// TODO: 待移除（下兩次 commit 後刪除）— 一次性邊界遷移
+app.post('/api/migrate-lab-boundaries', (req, res) => {
+    const labFiles = fs.readdirSync(segmentsDir).filter(f => f.endsWith('.lab'));
+    const results = [];
+
+    for (const file of labFiles) {
+        const filePath = path.join(segmentsDir, file);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+        const parsed = lines.map(line => {
+            const parts = line.split(/\s+/);
+            if (parts.length < 3) return null;
+            const start = parseFloat(parts[0]);
+            const end = parseFloat(parts[1]);
+            return { start, end, rest: parts.slice(2).join(' ') };
+        }).filter(Boolean);
+
+        if (parsed.length === 0) {
+            results.push({ file, status: 'skipped', reason: 'empty' });
+            continue;
+        }
+
+        // 格式偵測：與 parseLab 相同邏輯，只處理 HTK 整數格式
+        const isHTK = parsed[0].start > 100000 || parsed[0].end > 100000;
+        if (!isHTK) {
+            results.push({ file, status: 'skipped', reason: 'not HTK format' });
+            continue;
+        }
+
+        // HTK 格式：取整後做邊界修正
+        const intParsed = parsed.map(p => ({
+            start: Math.round(p.start),
+            end: Math.round(p.end),
+            rest: p.rest,
+        }));
+
+        let changed = false;
+        for (let i = 0; i < intParsed.length - 1; i++) {
+            const nextStart = intParsed[i + 1].start;
+            if (intParsed[i].end >= nextStart) {
+                intParsed[i].end = nextStart - 1;
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            const newContent = intParsed.map(p => `${p.start} ${p.end} ${p.rest}`).join('\n');
+            fs.writeFileSync(filePath, newContent);
+            results.push({ file, status: 'fixed' });
+        } else {
+            results.push({ file, status: 'ok' });
+        }
+    }
+
+    res.json({ migrated: results.length, results });
+});
+
 app.get('/api/recordings', (req, res) => {
     const rawFiles = fs.readdirSync(uploadsDir)
         .filter(f => f.endsWith('.wav') && !/^\d+\.wav$/.test(f))

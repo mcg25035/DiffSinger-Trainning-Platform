@@ -152,8 +152,21 @@ export function useRegionManager(
   // 刪除選中的 region
   const deleteSelected = useCallback(() => {
     if (!selectedRegion || !regionsRef.current) return;
+
+    // 取得刪除前的排序與索引，用 id 匹配避免物件引用不一致
+    const allBefore = regionsRef.current
+      .getRegions()
+      .sort((a: Region, b: Region) => a.start - b.start);
+    const idx = allBefore.findIndex((r: Region) => r.id === selectedRegion.id);
+    const deletedEnd = selectedRegion.end;
+
     selectedRegion.remove();
     setSelectedRegion(null);
+
+    // 讓前一個 region 延伸以填補空隙（float 域共享邊界，-1 由序列化層處理）
+    if (idx > 0) {
+      allBefore[idx - 1].setOptions({ end: deletedEnd });
+    }
 
     // 重新計算層級顏色
     const newAll = regionsRef.current
@@ -310,15 +323,26 @@ export function useRegionManager(
 
 /** 從 Region[] 序列化為 .lab 文字 */
 function stringifyFromRegions(regions: Region[]): string {
-  return regions
-    .sort((a, b) => a.start - b.start)
-    .map((r) => {
-      const s = Math.round(r.start * 10000000);
-      const e = Math.round(r.end * 10000000);
-      const label = getRegionLabel(r);
-      return `${s} ${e} ${label}`;
-    })
-    .join('\n');
+  const sorted = [...regions].sort((a, b) => a.start - b.start);
+  const lines: string[] = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const s = Math.round(sorted[i].start * 10000000);
+    let e = Math.round(sorted[i].end * 10000000);
+    const label = getRegionLabel(sorted[i]);
+
+    // 相鄰邊界修正：prev.end = next.start - 1（整數域）
+    if (i < sorted.length - 1) {
+      const nextStart = Math.round(sorted[i + 1].start * 10000000);
+      if (e >= nextStart) {
+        e = nextStart - 1;
+      }
+    }
+
+    lines.push(`${s} ${e} ${label}`);
+  }
+
+  return lines.join('\n');
 }
 
 /** 從 .lab 文字快速解析（用於 undo，不需要信心分數） */
