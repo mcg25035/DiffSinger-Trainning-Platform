@@ -29,6 +29,7 @@ import { getRegionLabel } from '../utils/regionStyle';
 import { LabelToolbar } from './label-editor/LabelToolbar';
 import { PhonemeEditPanel } from './label-editor/PhonemeEditPanel';
 import { RegionButtonTrack } from './label-editor/RegionButtonTrack';
+import { LyricsDisplay } from './label-editor/LyricsDisplay';
 import './label-editor/LabelEditor.css';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 
@@ -408,6 +409,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
           </div>
         </div>
       </div>
+      <LyricsDisplay lyrics={lyrics} visible={isFullscreen} />
     </div>
   );
 }

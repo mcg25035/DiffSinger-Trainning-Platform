@@ -396,3 +396,67 @@
   border-color: rgba(0, 229, 255, 0.8) !important;
   color: #fff !important;
 }
+
+/* ── Lyrics Overlay in Fullscreen ── */
+.label-editor__lyrics-overlay {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(20, 20, 20, 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 4px solid #00e5ff;
+  border-radius: 12px;
+  padding: 12px 20px;
+  max-width: 380px;
+  z-index: 10000;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: lyrics-fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.3s ease;
+  pointer-events: none; /* Let user click through to elements underneath if needed */
+}
+
+@keyframes lyrics-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.label-editor__lyrics-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.label-editor__lyrics-icon {
+  color: #00e5ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.label-editor__lyrics-title {
+  font-size: 11px;
+  color: #888;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.label-editor__lyrics-content {
+  font-size: 16px;
+  color: #fff;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-word;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
