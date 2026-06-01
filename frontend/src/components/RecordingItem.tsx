@@ -9,9 +9,10 @@ interface Props {
   onRefresh?: () => void;
   phonemeSet?: Set<string>;
   dictionaryId?: string;
+  isActive?: boolean;
 }
 
-export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId }: Props) => {
+export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId, isActive }: Props) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [markerProgress, setMarkerProgress] = useState(0);
@@ -20,6 +21,8 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
   const [isAligning, setIsAligning] = useState(false);
   const [lyrics, setLyrics] = useState(recording.lyrics || '');
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [isHovered, setIsHovered] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const pollIntervalRef = useRef<number | null>(null);
 
   const startPolling = (jobId: string) => {
@@ -267,33 +270,24 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
       style={{ 
         display: 'flex', 
         flexDirection: 'column',
-        background: '#1a1a1a', 
-        padding: '12px 16px', 
+        background: isActive 
+          ? (isHovered ? '#2c2c2c' : '#222') 
+          : (isHovered ? '#222' : '#1a1a1a'), 
+        padding: isActive ? '11px 15px' : '12px 16px', 
         borderRadius: '14px', 
-        border: '1px solid #333',
+        border: isActive 
+          ? '2px solid #00e5ff' 
+          : (isFocused ? '1px solid #777' : (isHovered ? '1px solid #555' : '1px solid #333')),
+        boxShadow: isActive ? '0 0 12px rgba(0, 229, 255, 0.35)' : 'none',
         transition: 'all 0.2s',
         marginBottom: '10px',
         cursor: 'default',
         outline: 'none'
       }}
-      onFocus={e => {
-        e.currentTarget.style.borderColor = '#777';
-      }}
-      onBlur={e => {
-        e.currentTarget.style.borderColor = '#333';
-      }}
-      onMouseOver={e => {
-        if (document.activeElement !== e.currentTarget) {
-          e.currentTarget.style.borderColor = '#555';
-        }
-        e.currentTarget.style.background = '#222';
-      }}
-      onMouseOut={e => {
-        if (document.activeElement !== e.currentTarget) {
-          e.currentTarget.style.borderColor = '#333';
-        }
-        e.currentTarget.style.background = '#1a1a1a';
-      }}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
