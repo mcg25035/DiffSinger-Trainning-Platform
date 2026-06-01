@@ -202,12 +202,12 @@ export function useAudioPlayback({
         syncAnimRef.current = null;
       }
       clearSafetyTimer();
-      setPlaying(false, 'onended');
       try {
         onTimeUpdateRef.current(start);
       } catch (_) {
         /* ignore */
       }
+      setPlaying(false, 'onended');
     };
 
     audio.onplay = () => {
@@ -263,12 +263,12 @@ export function useAudioPlayback({
         syncAnimRef.current = null;
       }
       clearSafetyTimer();
-      setPlaying(false, 'onended-full');
       try {
         onTimeUpdateRef.current(audio.duration);
       } catch (_) {
         /* ignore */
       }
+      setPlaying(false, 'onended-full');
     };
 
     audio.onplay = () => {

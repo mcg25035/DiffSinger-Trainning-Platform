@@ -116,8 +116,12 @@ export function LabelEditor({ recording, onCancel }: Props) {
     onTimeUpdate: (t) => wavesurfer.wavesurferRef.current?.setTime(t),
     onPlaybackStateChange: (p) => {
       setIsPlaying(p);
-      if (!p) {
-        setActivePlayRange(null);
+      if (p) return;
+
+      setActivePlayRange(null);
+      const ws = wavesurfer.wavesurferRef.current;
+      if (ws && regionMgr.selectedRegion) {
+        ws.setTime(regionMgr.selectedRegion.start);
       }
     },
   });
