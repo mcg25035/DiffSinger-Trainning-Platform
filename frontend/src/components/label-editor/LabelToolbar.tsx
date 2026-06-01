@@ -73,50 +73,8 @@ export function LabelToolbar({
     </div>
   );
 
-  // 全螢幕模式下的 Toolbar
-  if (isFullscreen) {
-    return (
-      <div className="label-toolbar label-toolbar--fullscreen-mode">
-        <div className="label-toolbar__left">
-          <div className="label-toolbar__title-group">
-            {renderCloudIcon()}
-          </div>
-          
-          {/* 保留核心的 ZOOM / SPEED 和狀態，這在調整音素視圖時依然很有用 */}
-          <div className="label-toolbar__controls">
-            <div className="label-toolbar__slider-group">
-              <label className="label-toolbar__slider-label">ZOOM</label>
-              <input type="range" min="20" max="1000" value={zoomLevel} onChange={(e) => onZoomChange(Number(e.target.value))} className="label-toolbar__slider label-toolbar__slider--zoom" />
-            </div>
-            <div className="label-toolbar__slider-group">
-              <label className="label-toolbar__slider-label">SPEED</label>
-              <input type="range" min="0.1" max="2.0" step="0.1" value={playbackRate} onChange={(e) => onPlaybackRateChange(Number(e.target.value))} className="label-toolbar__slider label-toolbar__slider--speed" />
-              <span className="label-toolbar__speed-value">{playbackRate.toFixed(1)}x</span>
-            </div>
-            <span className="label-toolbar__status">
-              {error ? (
-                <span className="label-toolbar__error">{error}</span>
-              ) : !isLoaded || !isAudioLoaded ? (
-                'Loading...'
-              ) : (
-                `${labelsCount} labels loaded`
-              )}
-            </span>
-          </div>
-        </div>
-
-        <div className="label-toolbar__right">
-          <button onClick={onToggleFullscreen} className="label-toolbar__btn label-toolbar__btn--exit">
-            ⛶ EXIT-FULL-SCREEN
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // 正常模式下的 Toolbar
   return (
-    <div className="label-toolbar">
+    <div className={`label-toolbar ${isFullscreen ? 'label-toolbar--fullscreen-mode' : ''}`}>
       <div className="label-toolbar__left">
         <div className="label-toolbar__title-group">
           <h2 className="label-toolbar__title">{filename || 'VISUAL LABELER'}</h2>
@@ -125,13 +83,13 @@ export function LabelToolbar({
 
         <div className="label-toolbar__play-buttons">
           <button onClick={onWordPlay} disabled={disabled} className="label-toolbar__btn label-toolbar__btn--word">
-            WORD-PLAY
+            Word Play
           </button>
           <button onClick={onPhonemePlay} disabled={disabled} className="label-toolbar__btn label-toolbar__btn--phoneme">
-            PHONEME-PLAY
+            Phoneme Play
           </button>
           <button onClick={onFullPlay} disabled={disabled} className={`label-toolbar__btn label-toolbar__btn--full ${isPlaying ? 'label-toolbar__btn--playing' : ''}`}>
-            {isPlaying ? 'PAUSE' : 'FULL-PLAY'}
+            {isPlaying ? 'Pause' : 'Full Play'}
           </button>
         </div>
 
@@ -158,14 +116,16 @@ export function LabelToolbar({
       </div>
 
       <div className="label-toolbar__right">
-        <button onClick={onToggleFullscreen} className="label-toolbar__btn label-toolbar__btn--fullscreen">
-          ⛶ FULL-SCREEN
-        </button>
+        {onToggleFullscreen && (
+          <button onClick={onToggleFullscreen} className={`label-toolbar__btn ${isFullscreen ? 'label-toolbar__btn--exit' : 'label-toolbar__btn--fullscreen'}`}>
+            {isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
+          </button>
+        )}
         <button onClick={onCancel} className="label-toolbar__btn label-toolbar__btn--cancel">
-          CANCEL
+          Cancel
         </button>
         <button onClick={onSave} disabled={isSaving || !isLoaded} className="label-toolbar__btn label-toolbar__btn--save">
-          {isSaving ? 'SAVING...' : 'SAVE CHANGES'}
+          {isSaving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
     </div>

@@ -61,6 +61,7 @@ export function useRegionManager(
 
   const isUpdatingRef = useRef(false);
   const undoStackRef = useRef<string[]>([]);
+  const lastSegmentsRef = useRef<LabSegment[]>([]);
 
   // 刷新 region state（從 DOM 讀取最新資料）
   const refreshRegionsState = useCallback(() => {
@@ -76,6 +77,14 @@ export function useRegionManager(
         region: r,
       }))
     );
+
+    // 暫存最新的 segments，避免 wavesurfer 銷毀時丟失修改進度
+    lastSegmentsRef.current = all.map((r: Region) => ({
+      start: r.start,
+      end: r.end,
+      label: getRegionLabel(r),
+      score: getRegionScore(r),
+    }));
   }, [regionsRef]);
 
   // 通知外部（runAlignment 等）
@@ -286,17 +295,8 @@ export function useRegionManager(
 
   // 取得當前 segments
   const getCurrentSegments = useCallback((): LabSegment[] => {
-    if (!regionsRef.current) return [];
-    return regionsRef.current
-      .getRegions()
-      .sort((a: Region, b: Region) => a.start - b.start)
-      .map((r: Region) => ({
-        start: r.start,
-        end: r.end,
-        label: getRegionLabel(r),
-        score: getRegionScore(r),
-      }));
-  }, [regionsRef]);
+    return lastSegmentsRef.current;
+  }, []);
 
   return {
     selectedRegion,
