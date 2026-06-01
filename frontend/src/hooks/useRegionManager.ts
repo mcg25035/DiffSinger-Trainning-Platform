@@ -11,6 +11,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import type React from 'react';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 import type RegionsPlugin from 'wavesurfer.js/plugins/regions';
 import type { LabSegment } from '../utils/labParser';
@@ -21,6 +22,8 @@ import {
   getRegionScore,
   getRegionWordIndex,
 } from '../utils/regionStyle';
+import { stringifyFromRegions, parseLabFromString } from '../utils/labSerialization';
+import { updateRegionPositions, getShiftSelectionIds } from '../utils/regionPositionHelper';
 
 export interface RegionItem {
   id: string;
@@ -32,6 +35,7 @@ export interface RegionItem {
 export interface UseRegionManagerReturn {
   // State
   selectedRegion: Region | null;
+  selectedRegionIds: Set<string>;
   editLabel: string;
   labelsCount: number | null;
   regionItems: RegionItem[];
@@ -43,8 +47,9 @@ export interface UseRegionManagerReturn {
   updateLabel: () => void;
   deleteSelected: () => void;
   splitAtTime: (time: number) => void;
+  handleRegionUpdate: (region: Region) => void;
   handleRegionUpdated: (region: Region) => void;
-  handleRegionClicked: (region: Region) => void;
+  handleRegionClicked: (region: Region, e?: MouseEvent | React.MouseEvent) => void;
   refreshRegionsState: () => void;
   undo: () => void;
   saveHistory: () => void;
@@ -57,7 +62,8 @@ export function useRegionManager(
   regionsRef: React.MutableRefObject<RegionsPlugin | null>,
   onChange?: () => void
 ): UseRegionManagerReturn {
-  const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
+  const [selectedRegion, setSelectedRegionState] = useState<Region | null>(null);
+  const [selectedRegionIds, setSelectedRegionIds] = useState<Set<string>>(new Set());
   const [editLabel, setEditLabel] = useState('');
   const [labelsCount, setLabelsCount] = useState<number | null>(null);
   const [regionItems, setRegionItems] = useState<RegionItem[]>([]);
@@ -65,6 +71,16 @@ export function useRegionManager(
   const isUpdatingRef = useRef(false);
   const undoStackRef = useRef<string[]>([]);
   const lastSegmentsRef = useRef<LabSegment[]>([]);
+  const dragStartPositionsRef = useRef<Map<string, { start: number; end: number }> | null>(null);
+
+  const setSelectedRegion = useCallback((r: Region | null) => {
+    setSelectedRegionState(r);
+    if (r) {
+      setSelectedRegionIds(new Set([r.id]));
+    } else {
+      setSelectedRegionIds(new Set());
+    }
+  }, []);
 
   // 刷新 region state（從 DOM 讀取最新資料）
   const refreshRegionsState = useCallback(() => {
@@ -147,6 +163,7 @@ export function useRegionManager(
 
   // 更新選中 region 的標籤
   const updateLabel = useCallback(() => {
+    if (selectedRegionIds.size > 1) return;
     if (!selectedRegion || !regionsRef.current) return;
     const all = regionsRef.current
       .getRegions()
@@ -162,7 +179,7 @@ export function useRegionManager(
     applyRegionStyle(selectedRegion, editLabel, level, score, wordIndex);
 
     commitChange();
-  }, [selectedRegion, editLabel, regionsRef, commitChange]);
+  }, [selectedRegion, selectedRegionIds, editLabel, regionsRef, commitChange]);
 
   // 更新選中 region 的 wordIndex
   const updateRegionWordIndex = useCallback((regionId: string, wordIndex: number | undefined) => {
@@ -184,10 +201,11 @@ export function useRegionManager(
     }
 
     commitChange();
-  }, [regionsRef, selectedRegion, commitChange]);
+  }, [regionsRef, selectedRegion, setSelectedRegion, commitChange]);
 
   // 刪除選中的 region
   const deleteSelected = useCallback(() => {
+    if (selectedRegionIds.size > 1) return;
     if (!selectedRegion || !regionsRef.current) return;
 
     // 取得刪除前的排序與索引，用 id 匹配避免物件引用不一致
@@ -218,7 +236,7 @@ export function useRegionManager(
     });
 
     commitChange();
-  }, [selectedRegion, regionsRef, commitChange]);
+  }, [selectedRegion, selectedRegionIds, regionsRef, setSelectedRegion, commitChange]);
 
   // 在指定時間點切割 region
   const splitAtTime = useCallback(
@@ -268,31 +286,65 @@ export function useRegionManager(
     [regionsRef, commitChange]
   );
 
+  // region 拖動過程中鄰居邊界/多選同步調整
+  const handleRegionUpdate = useCallback(
+    (r: Region) => {
+      if (isUpdatingRef.current) return;
+      if (!regionsRef.current) return;
+
+      if (!dragStartPositionsRef.current) {
+        const map = new Map<string, { start: number; end: number }>();
+        regionsRef.current.getRegions().forEach((reg) => {
+          map.set(reg.id, { start: reg.start, end: reg.end });
+        });
+        dragStartPositionsRef.current = map;
+      }
+
+      const all = regionsRef.current
+        .getRegions()
+        .sort((a: Region, b: Region) => a.start - b.start);
+
+      isUpdatingRef.current = true;
+      updateRegionPositions(r, all, selectedRegionIds, dragStartPositionsRef.current);
+      isUpdatingRef.current = false;
+    },
+    [selectedRegionIds, regionsRef]
+  );
+
   // region 拖拉後鄰居邊界調整
   const handleRegionUpdated = useCallback(
     (r: Region) => {
       if (isUpdatingRef.current) return;
       if (!regionsRef.current) return;
 
-      isUpdatingRef.current = true;
-      const all = regionsRef.current
-        .getRegions()
-        .sort((a: Region, b: Region) => a.start - b.start);
-      const i = all.indexOf(r);
-      if (i < all.length - 1) all[i + 1].setOptions({ start: r.end });
-      if (i > 0) all[i - 1].setOptions({ end: r.start });
-      isUpdatingRef.current = false;
-
+      handleRegionUpdate(r);
+      dragStartPositionsRef.current = null;
       commitChange();
     },
-    [regionsRef, commitChange]
+    [handleRegionUpdate, commitChange]
   );
 
   // region 點擊 → 選取
-  const handleRegionClicked = useCallback((r: Region) => {
-    setSelectedRegion(r);
-    setEditLabel(getRegionLabel(r));
-  }, []);
+  const handleRegionClicked = useCallback(
+    (r: Region, e?: MouseEvent | React.MouseEvent) => {
+      if (!regionsRef.current) return;
+      const all = regionsRef.current
+        .getRegions()
+        .sort((a: Region, b: Region) => a.start - b.start);
+
+      const shouldMultiSelect = !!(e?.shiftKey && selectedRegion);
+      const nextSelectedIds = shouldMultiSelect
+        ? getShiftSelectionIds(all, selectedRegion!.id, r.id)
+        : new Set([r.id]);
+
+      if (!shouldMultiSelect) {
+        setSelectedRegionState(r);
+      }
+      setSelectedRegionIds(nextSelectedIds);
+      setEditLabel(getRegionLabel(r));
+    },
+    [selectedRegion, regionsRef]
+  );
 
   // 撤銷
   const undo = useCallback(() => {
@@ -331,6 +383,7 @@ export function useRegionManager(
 
   return {
     selectedRegion,
+    selectedRegionIds,
     editLabel,
     labelsCount,
     regionItems,
@@ -342,6 +395,7 @@ export function useRegionManager(
     updateRegionWordIndex,
     deleteSelected,
     splitAtTime,
+    handleRegionUpdate,
     handleRegionUpdated,
     handleRegionClicked,
     refreshRegionsState,
@@ -351,74 +405,4 @@ export function useRegionManager(
   };
 }
 
-// ── 內部工具函式 ──
 
-/** 從 Region[] 序列化為 .lab 文字 */
-function stringifyFromRegions(regions: Region[]): string {
-  const sorted = [...regions].sort((a, b) => a.start - b.start);
-  const lines: string[] = [];
-
-  for (let i = 0; i < sorted.length; i++) {
-    const s = Math.round(sorted[i].start * 10000000);
-    let e = Math.round(sorted[i].end * 10000000);
-    const label = getRegionLabel(sorted[i]);
-    const score = getRegionScore(sorted[i]);
-    const wordIndex = getRegionWordIndex(sorted[i]);
-
-    // 相鄰邊界修正：prev.end = next.start - 1（整數域）
-    if (i < sorted.length - 1) {
-      const nextStart = Math.round(sorted[i + 1].start * 10000000);
-      if (e >= nextStart) {
-        e = nextStart - 1;
-      }
-    }
-
-    const scoreVal = score !== undefined ? score : 1.0;
-    const wordIdxVal = wordIndex !== undefined ? wordIndex : '';
-
-    if (wordIdxVal !== '') {
-      lines.push(`${s} ${e} ${label} ${scoreVal.toFixed(4)} ${wordIdxVal}`);
-    } else if (score !== undefined) {
-      lines.push(`${s} ${e} ${label} ${scoreVal.toFixed(4)}`);
-    } else {
-      lines.push(`${s} ${e} ${label}`);
-    }
-  }
-
-  return lines.join('\n');
-}
-
-/** 從 .lab 文字快速解析（用於 undo，不需要信心分數） */
-function parseLabFromString(content: string): LabSegment[] {
-  return content
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const parts = line.split(/\s+/);
-      if (parts.length < 3) return null;
-      let start = parseFloat(parts[0]);
-      let end = parseFloat(parts[1]);
-      const label = parts[2];
-      if (start > 100000 || end > 100000) {
-        start /= 10000000;
-        end /= 10000000;
-      }
-      let score: number | undefined = undefined;
-      if (parts.length >= 4) {
-        const parsedScore = parseFloat(parts[3]);
-        if (!isNaN(parsedScore)) {
-          score = parsedScore;
-        }
-      }
-      let wordIndex: number | undefined = undefined;
-      if (parts.length >= 5) {
-        const parsedIdx = parseInt(parts[4], 10);
-        if (!isNaN(parsedIdx)) {
-          wordIndex = parsedIdx;
-        }
-      }
-      return { start, end, label, score, wordIndex } as LabSegment;
-    })
-    .filter((s): s is LabSegment => s !== null);
-}

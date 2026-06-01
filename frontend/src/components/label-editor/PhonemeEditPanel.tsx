@@ -6,6 +6,7 @@ import type { Region } from 'wavesurfer.js/plugins/regions';
 
 interface Props {
   selectedRegion: Region | null;
+  isMultipleSelect?: boolean;
   editLabel: string;
   onEditLabelChange: (label: string) => void;
   onUpdate: () => void;
@@ -17,6 +18,7 @@ interface Props {
 
 export function PhonemeEditPanel({
   selectedRegion,
+  isMultipleSelect,
   editLabel,
   onEditLabelChange,
   onUpdate,
@@ -31,6 +33,17 @@ export function PhonemeEditPanel({
         <span className="phoneme-edit__hint">
           Select a region in the track below or waveform to edit its phoneme.
         </span>
+      </div>
+    );
+  }
+
+  if (isMultipleSelect) {
+    return (
+      <div className="phoneme-edit">
+        <span className="phoneme-edit__hint">
+          Multiple phonemes selected (Move boundaries to drag them together).
+        </span>
+        <button onClick={onDeselect} className="phoneme-edit__btn phoneme-edit__btn--close">X</button>
       </div>
     );
   }

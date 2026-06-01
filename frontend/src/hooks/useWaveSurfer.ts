@@ -21,8 +21,9 @@ export interface UseWaveSurferOptions {
   waveformHeight?: number;
   spectrogramHeight?: number;
   onReady?: (ws: WaveSurfer, regions: RegionsPlugin) => void;
+  onRegionUpdate?: (region: Region) => void;
   onRegionUpdated?: (region: Region) => void;
-  onRegionClicked?: (region: Region) => void;
+  onRegionClicked?: (region: Region, e: MouseEvent) => void;
   onDblClick?: (time: number) => void;
 }
 
@@ -41,6 +42,7 @@ export function useWaveSurfer({
   waveformHeight = 100,
   spectrogramHeight = 180,
   onReady,
+  onRegionUpdate,
   onRegionUpdated,
   onRegionClicked,
   onDblClick,
@@ -53,11 +55,13 @@ export function useWaveSurfer({
 
   // 用 ref 持有最新的 callbacks 以避免 effect 重新綁定
   const onReadyRef = useRef(onReady);
+  const onRegionUpdateRef = useRef(onRegionUpdate);
   const onRegionUpdatedRef = useRef(onRegionUpdated);
   const onRegionClickedRef = useRef(onRegionClicked);
   const onDblClickRef = useRef(onDblClick);
   useEffect(() => {
     onReadyRef.current = onReady;
+    onRegionUpdateRef.current = onRegionUpdate;
     onRegionUpdatedRef.current = onRegionUpdated;
     onRegionClickedRef.current = onRegionClicked;
     onDblClickRef.current = onDblClick;
@@ -106,12 +110,16 @@ export function useWaveSurfer({
     });
 
     // Region 事件
+    regions.on('region-update', (r: Region) => {
+      onRegionUpdateRef.current?.(r);
+    });
+
     regions.on('region-updated', (r: Region) => {
       onRegionUpdatedRef.current?.(r);
     });
 
-    regions.on('region-clicked', (r: Region, _e: MouseEvent) => {
-      onRegionClickedRef.current?.(r);
+    regions.on('region-clicked', (r: Region, e: MouseEvent) => {
+      onRegionClickedRef.current?.(r, e);
     });
 
     // 雙擊切割

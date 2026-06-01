@@ -8,8 +8,8 @@ import { isSilentLabel, getValidWordIndexRange } from '../../utils/alignmentEngi
 
 interface Props {
   items: RegionItem[];
-  selectedId: string | undefined;
-  onSelect: (item: RegionItem) => void;
+  selectedIds: Set<string>;
+  onSelect: (item: RegionItem, e: React.MouseEvent) => void;
   wavesurferRef: React.MutableRefObject<WaveSurfer | null>;
   activePlayRange?: { start: number; end: number } | null;
   lyrics: string;
@@ -18,7 +18,7 @@ interface Props {
 
 export function RegionButtonTrack({
   items,
-  selectedId,
+  selectedIds,
   onSelect,
   wavesurferRef,
   activePlayRange,
@@ -27,8 +27,8 @@ export function RegionButtonTrack({
 }: Props) {
   const words = lyrics.split(/\s+/).filter((w) => w.length > 0);
 
-  const handleClick = (item: RegionItem) => {
-    onSelect(item);
+  const handleClick = (item: RegionItem, e: React.MouseEvent) => {
+    onSelect(item, e);
 
     // 自動捲動到該 region 的位置
     const ws = wavesurferRef.current;
@@ -61,9 +61,9 @@ export function RegionButtonTrack({
         return (
           <div key={item.id} className="region-track__col">
             <button
-              onClick={() => handleClick(item)}
+              onClick={(e) => handleClick(item, e)}
               className={`region-track__btn ${
-                selectedId === item.id ? 'region-track__btn--selected' : ''
+                selectedIds.has(item.id) ? 'region-track__btn--selected' : ''
               } ${isPlayingThis ? 'region-track__btn--playing' : ''}`}
             >
               {item.label || 'SP'}

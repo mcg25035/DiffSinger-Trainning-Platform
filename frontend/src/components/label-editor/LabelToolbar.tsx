@@ -7,6 +7,7 @@ interface Props {
   isLoaded: boolean;
   isAudioLoaded: boolean;
   isPlaying: boolean;
+  isMultipleSelect?: boolean;
   labelsCount: number | null;
   error: string | null;
   // Save
@@ -34,6 +35,7 @@ export function LabelToolbar({
   isLoaded,
   isAudioLoaded,
   isPlaying,
+  isMultipleSelect = false,
   labelsCount,
   error,
   isSaving,
@@ -51,7 +53,7 @@ export function LabelToolbar({
   onToggleFullscreen,
   filename,
 }: Props) {
-  const disabled = !isLoaded || !isAudioLoaded;
+  const disabled = !isLoaded || !isAudioLoaded || isMultipleSelect;
 
   // 雲朵圖示 JSX
   const renderCloudIcon = () => (

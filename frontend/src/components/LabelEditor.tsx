@@ -96,11 +96,14 @@ export function LabelEditor({ recording, onCancel }: Props) {
         }
       }
     },
+    onRegionUpdate: (region) => {
+      regionMgr.handleRegionUpdate(region);
+    },
     onRegionUpdated: (region) => {
       regionMgr.handleRegionUpdated(region);
     },
-    onRegionClicked: (region) => {
-      regionMgr.handleRegionClicked(region);
+    onRegionClicked: (region, e) => {
+      regionMgr.handleRegionClicked(region, e);
     },
     onDblClick: (time) => {
       regionMgr.splitAtTime(time);
@@ -153,7 +156,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
     all.forEach((r: Region) => {
       if (!r.element) return;
       let arrow = r.element.querySelector('.region-selected-arrow') as HTMLElement | null;
-      if (regionMgr.selectedRegion && r.id === regionMgr.selectedRegion.id) {
+      if (regionMgr.selectedRegionIds.has(r.id)) {
         if (!arrow) {
           arrow = document.createElement('div');
           arrow.className = 'region-selected-arrow';
@@ -185,7 +188,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
         }
       }
     });
-  }, [regionMgr.selectedRegion, regionMgr.regionItems]);
+  }, [regionMgr.selectedRegionIds, regionMgr.regionItems]);
 
   // ── save status 自動清除 ──
   useEffect(() => {
@@ -209,6 +212,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
   // ── 播放 handlers ──
   const handlePhonemePlay = useCallback(() => {
+    if (regionMgr.selectedRegionIds.size > 1) return;
     const ws = wavesurfer.wavesurferRef.current;
     const regions = wavesurfer.regionsRef.current;
     if (!ws || !regions) return;
@@ -246,9 +250,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
       lastPlaybackRef.current = { start: target.start, end: target.end, timestamp: Date.now() };
       handlePlayRange(target.start, target.end);
     }
-  }, [audio, wavesurfer.wavesurferRef, wavesurfer.regionsRef, handlePlayRange]);
+  }, [audio, wavesurfer.wavesurferRef, wavesurfer.regionsRef, handlePlayRange, regionMgr.selectedRegionIds]);
 
   const handleWordPlay = useCallback(() => {
+    if (regionMgr.selectedRegionIds.size > 1) return;
     const ws = wavesurfer.wavesurferRef.current;
     if (!ws) return;
 
@@ -283,9 +288,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
       lastWordPlaybackRef.current = { start: word.start, end: word.end, timestamp: Date.now() };
       handlePlayRange(word.start, word.end);
     }
-  }, [audio, wavesurfer.wavesurferRef, alignment, handlePlayRange]);
+  }, [audio, wavesurfer.wavesurferRef, alignment, handlePlayRange, regionMgr.selectedRegionIds]);
 
   const handleFullPlay = useCallback(() => {
+    if (regionMgr.selectedRegionIds.size > 1) return;
     const ws = wavesurfer.wavesurferRef.current;
     if (!ws) return;
 
@@ -299,7 +305,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
       startTime = 0;
     }
     audio.playFull(startTime);
-  }, [audio, wavesurfer.wavesurferRef]);
+  }, [audio, wavesurfer.wavesurferRef, regionMgr.selectedRegionIds]);
 
   const handleSave = useCallback(async () => {
     const segments = regionMgr.getCurrentSegments();
@@ -359,6 +365,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
         isLoaded={wavesurfer.isLoaded}
         isAudioLoaded={audio.isAudioLoaded}
         isPlaying={isPlaying}
+        isMultipleSelect={regionMgr.selectedRegionIds.size > 1}
         labelsCount={regionMgr.labelsCount}
         error={persistence.error}
         isSaving={persistence.isSaving}
@@ -392,6 +399,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
             <PhonemeEditPanel
               inputRef={inputRef}
               selectedRegion={regionMgr.selectedRegion}
+              isMultipleSelect={regionMgr.selectedRegionIds.size > 1}
               editLabel={regionMgr.editLabel}
               onEditLabelChange={regionMgr.setEditLabel}
               onUpdate={regionMgr.updateLabel}
@@ -409,11 +417,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
             <RegionButtonTrack
               items={regionMgr.regionItems}
-              selectedId={regionMgr.selectedRegion?.id}
+              selectedIds={regionMgr.selectedRegionIds}
               activePlayRange={activePlayRange}
-              onSelect={(item) => {
-                regionMgr.setSelectedRegion(item.region);
-                regionMgr.setEditLabel(item.label);
+              onSelect={(item, e) => {
+                regionMgr.handleRegionClicked(item.region, e);
               }}
               wavesurferRef={wavesurfer.wavesurferRef}
               lyrics={lyrics}
