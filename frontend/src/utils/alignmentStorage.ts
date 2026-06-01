@@ -17,7 +17,8 @@ export function loadWordAlignmentMap(filename: string, segments: SegmentWithWord
     const arr = JSON.parse(stored);
     if (Array.isArray(arr) && arr.length === segments.length) {
       segments.forEach((seg, idx) => {
-        seg.wordIndex = arr[idx];
+        const val = arr[idx];
+        seg.wordIndex = val === null ? undefined : val;
       });
     }
   } catch (e) {

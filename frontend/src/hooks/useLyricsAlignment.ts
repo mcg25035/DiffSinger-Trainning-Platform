@@ -11,7 +11,7 @@ import {
   type LabelInfo,
 } from '../utils/alignmentEngine';
 import { saveWordAlignmentMap } from '../utils/alignmentStorage';
-import { getRegionLabel, getRegionWordIndex } from '../utils/regionStyle';
+import { getRegionLabel, getRegionWordIndex, type ExtendedRegion } from '../utils/regionStyle';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 import type RegionsPlugin from 'wavesurfer.js/plugins/regions';
 
@@ -57,10 +57,12 @@ export function useLyricsAlignment(
     const instances = alignLyricsToLabels(words, labels);
     setWordInstances(instances);
 
-    // 將自動分配好的單詞索引寫回 region DOM 屬性，以便後續儲存
+    // 將自動分配好的單詞索引寫回 region DOM 屬性，與 Region 物件屬性，以便後續儲存與快取
     allRegions.forEach((r: Region, i: number) => {
       const idx = labels[i].wordIndex;
-      if (idx !== undefined && getRegionWordIndex(r) === undefined) {
+      if (idx !== undefined) {
+        const extRegion = r as ExtendedRegion;
+        extRegion.wordIndex = idx;
         r.element?.setAttribute('data-label-word-index', idx.toString());
       }
     });

@@ -50,6 +50,12 @@ export function createLabelElement(label: string, level: number): HTMLDivElement
   return div;
 }
 
+export interface ExtendedRegion extends Region {
+  label?: string;
+  score?: number;
+  wordIndex?: number;
+}
+
 /**
  * 套用 region 的視覺樣式（背景色 + 邊界色）
  */
@@ -60,6 +66,11 @@ export function applyRegionStyle(
   score?: number,
   wordIndex?: number
 ): void {
+  const extRegion = region as ExtendedRegion;
+  extRegion.label = label;
+  extRegion.score = score;
+  extRegion.wordIndex = wordIndex;
+
   const isWarning = label === '!';
   const confColor = getConfidenceColor(score);
 
@@ -75,12 +86,12 @@ export function applyRegionStyle(
   // 透過 CSS 變數控制邊界顏色
   if (region.element) {
     region.element.style.setProperty('--region-border-color', confColor);
-    if (score !== undefined) {
+    if (score != null) {
       region.element.setAttribute('data-label-score', score.toString());
     } else {
       region.element.removeAttribute('data-label-score');
     }
-    if (wordIndex !== undefined) {
+    if (wordIndex != null) {
       region.element.setAttribute('data-label-word-index', wordIndex.toString());
     } else {
       region.element.removeAttribute('data-label-word-index');
@@ -92,6 +103,8 @@ export function applyRegionStyle(
  * 從 region 讀取標籤文字
  */
 export function getRegionLabel(region: Region): string {
+  const extRegion = region as ExtendedRegion;
+  if (extRegion.label != null) return extRegion.label;
   return region.content?.getAttribute('data-label-text') || '';
 }
 
@@ -99,6 +112,8 @@ export function getRegionLabel(region: Region): string {
  * 從 region 讀取信心分數
  */
 export function getRegionScore(region: Region): number | undefined {
+  const extRegion = region as ExtendedRegion;
+  if (extRegion.score != null) return extRegion.score;
   const scoreAttr =
     region.element?.getAttribute('data-label-score') ||
     region.content?.getAttribute('data-label-score');
@@ -109,6 +124,8 @@ export function getRegionScore(region: Region): number | undefined {
  * 從 region 讀取 Word Index
  */
 export function getRegionWordIndex(region: Region): number | undefined {
+  const extRegion = region as ExtendedRegion;
+  if (extRegion.wordIndex != null) return extRegion.wordIndex;
   const wordIndexAttr =
     region.element?.getAttribute('data-label-word-index') ||
     region.content?.getAttribute('data-label-word-index');
