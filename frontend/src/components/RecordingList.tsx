@@ -8,9 +8,10 @@ interface Props {
   onRefresh?: () => void;
   phonemeSet?: Set<string>;
   dictionaryId?: string;
+  activeFilename?: string;
 }
 
-export function RecordingList({ recordings, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId }: Props) {
+export function RecordingList({ recordings, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId, activeFilename }: Props) {
   if (recordings.length === 0) {
     return (
       <div style={{ padding: '30px', textAlign: 'center', background: '#121212', borderRadius: '12px', border: '1px dashed #222' }}>
@@ -30,6 +31,7 @@ export function RecordingList({ recordings, onSplit, onLabel, onRefresh, phoneme
             onRefresh={onRefresh} 
             phonemeSet={phonemeSet} 
             dictionaryId={dictionaryId}
+            isActive={rec.filename === activeFilename}
         />
       ))}
     </div>
