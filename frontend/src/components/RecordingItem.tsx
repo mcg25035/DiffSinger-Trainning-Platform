@@ -25,7 +25,12 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isHovered, setIsHovered] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+  const [isChecked, setIsChecked] = useState(recording.isChecked || false);
   const pollIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setIsChecked(recording.isChecked || false);
+  }, [recording.isChecked]);
 
   const startPolling = (jobId: string) => {
     setIsAligning(true);
@@ -183,6 +188,25 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
     }
   };
 
+  const handleToggleCheck = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const nextChecked = e.target.checked;
+    setIsChecked(nextChecked);
+    try {
+        const res = await fetch('/api/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: recording.filename, checked: nextChecked })
+        });
+        if (!res.ok) {
+            setIsChecked(!nextChecked);
+            alert('Failed to update checked status');
+        }
+    } catch (err) {
+        setIsChecked(!nextChecked);
+        console.error(err);
+    }
+  };
+
   const handleAlign = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!dictionaryId) return alert("Please select a language first");
@@ -297,6 +321,22 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+          {recording.type === 'segment' && (
+            <input 
+              type="checkbox" 
+              checked={isChecked}
+              onChange={handleToggleCheck}
+              onClick={(e) => e.stopPropagation()}
+              style={{ 
+                cursor: 'pointer',
+                accentColor: '#00e676',
+                width: '14px',
+                height: '14px',
+                marginBottom: '2px'
+              }}
+              title="Select for MMS-FA Custom Training"
+            />
+          )}
           <button 
             onClick={togglePlay}
             style={{ 

@@ -14,6 +14,7 @@ export interface Recording {
     isPending?: boolean;
     hasAlignment?: boolean;
     activeJobId?: string;
+    isChecked?: boolean;
 }
 
 export function useAudioMonitor() {
@@ -49,14 +50,15 @@ export function useAudioMonitor() {
                     type: 'raw'
                 }));
                 
-                const segments: Recording[] = data.segments.map((f: { filename: string, lyrics: string, isPending: boolean, hasAlignment: boolean, activeJobId?: string }) => ({
+                const segments: Recording[] = data.segments.map((f: { filename: string, lyrics: string, isPending: boolean, hasAlignment: boolean, activeJobId?: string, isChecked?: boolean }) => ({
                     filename: f.filename,
                     url: `/upload_segments/${f.filename}`,
                     type: 'segment',
                     lyrics: f.lyrics,
                     isPending: f.isPending,
                     hasAlignment: f.hasAlignment,
-                    activeJobId: f.activeJobId
+                    activeJobId: f.activeJobId,
+                    isChecked: f.isChecked
                 }));
 
                 segments.sort((a, b) => parseInt(b.filename, 10) - parseInt(a.filename, 10));

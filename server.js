@@ -521,6 +521,12 @@ app.post('/api/mms/sync-train', express.json(), async (req, res) => {
                 const labFile = file.replace(/\.wav$/, '.lab');
                 const labPath = path.join(segmentsDir, labFile);
                 const wavPath = path.join(segmentsDir, file);
+                const checkedPath = wavPath.replace(/\.wav$/, '.checked');
+                
+                // 只有打勾選中的片段（存在 .checked 檔案）且已有對齊資料（.lab）的片段才加入訓練
+                if (!fs.existsSync(checkedPath)) {
+                    continue;
+                }
                 
                 if (fs.existsSync(labPath)) {
                     const labContent = fs.readFileSync(labPath, 'utf-8');
@@ -625,6 +631,30 @@ app.post('/api/lab/:filename', express.text({ type: '*/*' }), (req, res) => {
 });
 
 
+app.post('/api/check', express.json(), (req, res) => {
+    const { filename, checked } = req.body;
+    if (!filename) return res.status(400).send('Missing filename');
+    
+    const txtFile = filename.replace(/\.wav$/, '.txt');
+    const checkedFile = filename.replace(/\.wav$/, '.checked');
+    const txtPath = path.join(segmentsDir, txtFile);
+    const checkedPath = path.join(segmentsDir, checkedFile);
+    
+    if (checked) {
+        if (fs.existsSync(txtPath)) {
+            const lyrics = fs.readFileSync(txtPath, 'utf-8');
+            fs.writeFileSync(checkedPath, lyrics);
+        } else {
+            fs.writeFileSync(checkedPath, '');
+        }
+    } else {
+        if (fs.existsSync(checkedPath)) {
+            fs.unlinkSync(checkedPath);
+        }
+    }
+    res.json({ success: true });
+});
+
 app.get('/api/recordings', (req, res) => {
     const rawFiles = fs.readdirSync(uploadsDir)
         .filter(f => f.endsWith('.wav') && !/^\d+\.wav$/.test(f))
@@ -636,12 +666,15 @@ app.get('/api/recordings', (req, res) => {
             const txtFile = f.replace(/\.wav$/, '.txt');
             const labFile = f.replace(/\.wav$/, '.lab');
             const pendingFile = f.replace(/\.wav$/, '.pending');
+            const checkedFile = f.replace(/\.wav$/, '.checked');
+            
             let lyrics = '';
             if (fs.existsSync(path.join(segmentsDir, txtFile))) {
                 lyrics = fs.readFileSync(path.join(segmentsDir, txtFile), 'utf-8');
             }
             const isPending = fs.existsSync(path.join(segmentsDir, pendingFile));
             const hasAlignment = fs.existsSync(path.join(segmentsDir, labFile));
+            const isChecked = fs.existsSync(path.join(segmentsDir, checkedFile));
             
             // Find any active background job for this file
             const activeJobId = Object.keys(jobs).find(id => 
@@ -649,7 +682,7 @@ app.get('/api/recordings', (req, res) => {
                 (jobs[id].status === 'pending' || jobs[id].status === 'processing')
             );
 
-            return { filename: f, type: 'segment', lyrics, isPending, hasAlignment, activeJobId };
+            return { filename: f, type: 'segment', lyrics, isPending, hasAlignment, activeJobId, isChecked };
         });
 
     res.json({ raw: rawFiles, segments: segmentFiles });
