@@ -44,6 +44,7 @@ export function useLyricsAlignment(
 
     const allRegions = regionsRef.current
       .getRegions()
+      .filter((r: Region) => r.id !== 'start-pointer')
       .sort((a: Region, b: Region) => a.start - b.start);
     const words = lyricsRef.current.split(/\s+/).filter((w: string) => w.length > 0);
 

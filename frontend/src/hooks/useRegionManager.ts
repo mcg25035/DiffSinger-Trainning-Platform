@@ -39,6 +39,7 @@ export interface UseRegionManagerReturn {
   editLabel: string;
   labelsCount: number | null;
   regionItems: RegionItem[];
+  startPointerTime: number;
   // Actions
   setSelectedRegion: (region: Region | null) => void;
   setEditLabel: (label: string) => void;
@@ -56,6 +57,8 @@ export interface UseRegionManagerReturn {
   updateRegionWordIndex: (regionId: string, wordIndex: number | undefined) => void;
   /** 取得當前所有 regions 的 LabSegment 表示 */
   getCurrentSegments: () => LabSegment[];
+  setStartPointerTime: (time: number) => void;
+  recreateStartPointer: (regions: RegionsPlugin, time?: number) => void;
 }
 
 export function useRegionManager(
@@ -67,6 +70,31 @@ export function useRegionManager(
   const [editLabel, setEditLabel] = useState('');
   const [labelsCount, setLabelsCount] = useState<number | null>(null);
   const [regionItems, setRegionItems] = useState<RegionItem[]>([]);
+
+  // Start pointer states
+  const [startPointerTime, setStartPointerTimeState] = useState(0);
+  const startPointerTimeRef = useRef(0);
+
+  const setStartPointerTime = useCallback((time: number) => {
+    startPointerTimeRef.current = time;
+    setStartPointerTimeState(time);
+  }, []);
+
+  const recreateStartPointer = useCallback((regions: RegionsPlugin, time?: number) => {
+    const existing = regions.getRegions().find((r) => r.id === 'start-pointer');
+    if (existing) {
+      existing.remove();
+    }
+    const t = time !== undefined ? time : startPointerTimeRef.current;
+    regions.addRegion({
+      id: 'start-pointer',
+      start: t,
+      end: t + 0.05,
+      drag: true,
+      resize: false,
+      color: 'transparent',
+    });
+  }, []);
 
   const isUpdatingRef = useRef(false);
   const undoStackRef = useRef<string[]>([]);
@@ -87,6 +115,7 @@ export function useRegionManager(
     if (!regionsRef.current) return;
     const all = regionsRef.current
       .getRegions()
+      .filter((r) => r.id !== 'start-pointer')
       .sort((a: Region, b: Region) => a.start - b.start);
     setLabelsCount(all.length);
     setRegionItems(
@@ -117,7 +146,9 @@ export function useRegionManager(
   // 儲存歷史紀錄
   const saveHistory = useCallback(() => {
     if (!regionsRef.current) return;
-    const current = stringifyFromRegions(regionsRef.current.getRegions());
+    const current = stringifyFromRegions(
+      regionsRef.current.getRegions().filter((r) => r.id !== 'start-pointer')
+    );
     const stack = undoStackRef.current;
     if (stack.length > 0 && stack[stack.length - 1] === current) return;
     undoStackRef.current = [...stack, current];
@@ -145,6 +176,10 @@ export function useRegionManager(
         });
         if (reg) applyRegionStyle(reg, seg.label, level, seg.score, seg.wordIndex);
       });
+
+      // Re-create the start pointer after clearing
+      recreateStartPointer(regions);
+
       isUpdatingRef.current = false;
       refreshRegionsState();
     },
@@ -156,7 +191,11 @@ export function useRegionManager(
     (segments: LabSegment[], regions: RegionsPlugin) => {
       renderSegments(segments, regions);
       // 初始化 undo stack
-      undoStackRef.current = [stringifyFromRegions(regions.getRegions())];
+      undoStackRef.current = [
+        stringifyFromRegions(
+          regions.getRegions().filter((r) => r.id !== 'start-pointer')
+        ),
+      ];
     },
     [renderSegments]
   );
@@ -167,6 +206,7 @@ export function useRegionManager(
     if (!selectedRegion || !regionsRef.current) return;
     const all = regionsRef.current
       .getRegions()
+      .filter((r) => r.id !== 'start-pointer')
       .sort((a: Region, b: Region) => a.start - b.start);
     const idx = all.indexOf(selectedRegion);
     const level = idx !== -1 ? idx % 2 : 0;
@@ -184,7 +224,7 @@ export function useRegionManager(
   // 更新選中 region 的 wordIndex
   const updateRegionWordIndex = useCallback((regionId: string, wordIndex: number | undefined) => {
     if (!regionsRef.current) return;
-    const all = regionsRef.current.getRegions();
+    const all = regionsRef.current.getRegions().filter((r) => r.id !== 'start-pointer');
     const region = all.find((r) => r.id === regionId);
     if (!region) return;
 
@@ -211,6 +251,7 @@ export function useRegionManager(
     // 取得刪除前的排序與索引，用 id 匹配避免物件引用不一致
     const allBefore = regionsRef.current
       .getRegions()
+      .filter((r) => r.id !== 'start-pointer')
       .sort((a: Region, b: Region) => a.start - b.start);
     const idx = allBefore.findIndex((r: Region) => r.id === selectedRegion.id);
     const deletedEnd = selectedRegion.end;
@@ -226,6 +267,7 @@ export function useRegionManager(
     // 重新計算層級顏色
     const newAll = regionsRef.current
       .getRegions()
+      .filter((r) => r.id !== 'start-pointer')
       .sort((a: Region, b: Region) => a.start - b.start);
     newAll.forEach((r: Region, i: number) => {
       const level = i % 2;
@@ -245,6 +287,7 @@ export function useRegionManager(
       const regions = regionsRef.current;
       const all = regions
         .getRegions()
+        .filter((r) => r.id !== 'start-pointer')
         .sort((a: Region, b: Region) => a.start - b.start);
       const target = all.find(
         (r: Region) => time >= r.start && time <= r.end
@@ -272,6 +315,7 @@ export function useRegionManager(
       // 重新計算所有層級
       const newAll = regions
         .getRegions()
+        .filter((r) => r.id !== 'start-pointer')
         .sort((a: Region, b: Region) => a.start - b.start);
       newAll.forEach((r: Region, idx: number) => {
         const level = idx % 2;
@@ -292,6 +336,11 @@ export function useRegionManager(
       if (isUpdatingRef.current) return;
       if (!regionsRef.current) return;
 
+      if (r.id === 'start-pointer') {
+        setStartPointerTime(r.start);
+        return;
+      }
+
       if (!dragStartPositionsRef.current) {
         const map = new Map<string, { start: number; end: number }>();
         regionsRef.current.getRegions().forEach((reg) => {
@@ -302,13 +351,14 @@ export function useRegionManager(
 
       const all = regionsRef.current
         .getRegions()
+        .filter((reg) => reg.id !== 'start-pointer')
         .sort((a: Region, b: Region) => a.start - b.start);
 
       isUpdatingRef.current = true;
       updateRegionPositions(r, all, selectedRegionIds, dragStartPositionsRef.current);
       isUpdatingRef.current = false;
     },
-    [selectedRegionIds, regionsRef]
+    [selectedRegionIds, regionsRef, setStartPointerTime]
   );
 
   // region 拖拉後鄰居邊界調整
@@ -317,19 +367,27 @@ export function useRegionManager(
       if (isUpdatingRef.current) return;
       if (!regionsRef.current) return;
 
+      if (r.id === 'start-pointer') {
+        setStartPointerTime(r.start);
+        dragStartPositionsRef.current = null;
+        return;
+      }
+
       handleRegionUpdate(r);
       dragStartPositionsRef.current = null;
       commitChange();
     },
-    [handleRegionUpdate, commitChange]
+    [handleRegionUpdate, commitChange, setStartPointerTime]
   );
 
   // region 點擊 → 選取
   const handleRegionClicked = useCallback(
     (r: Region, e?: MouseEvent | React.MouseEvent) => {
+      if (r.id === 'start-pointer') return;
       if (!regionsRef.current) return;
       const all = regionsRef.current
         .getRegions()
+        .filter((reg) => reg.id !== 'start-pointer')
         .sort((a: Region, b: Region) => a.start - b.start);
 
       const shouldMultiSelect = !!(e?.shiftKey && selectedRegion);
@@ -371,6 +429,10 @@ export function useRegionManager(
       });
       if (reg) applyRegionStyle(reg, seg.label, level, seg.score, seg.wordIndex);
     });
+
+    // Re-create start pointer in undo
+    recreateStartPointer(regionsRef.current);
+
     isUpdatingRef.current = false;
 
     notifyChange();
@@ -387,6 +449,7 @@ export function useRegionManager(
     editLabel,
     labelsCount,
     regionItems,
+    startPointerTime,
     setSelectedRegion,
     setEditLabel,
     loadRegions,
@@ -402,6 +465,8 @@ export function useRegionManager(
     undo,
     saveHistory,
     getCurrentSegments,
+    setStartPointerTime,
+    recreateStartPointer,
   };
 }
 

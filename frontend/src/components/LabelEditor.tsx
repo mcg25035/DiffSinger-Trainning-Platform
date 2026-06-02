@@ -58,6 +58,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
     spectrogramHeight: isFullscreen ? 500 : 180,
     onReady: (ws, regions) => {
       const duration = ws.getDuration();
+
+      // Reset start pointer to 0 when loading a new file
+      regionMgr.setStartPointerTime(0);
+
       const currentSegments = regionMgr.getCurrentSegments();
 
       // 如果當前 React state 中已有編輯中的 segments，我們直接載入，不讀取 API，以保持未存檔進度與 undoStack
@@ -74,6 +78,10 @@ export function LabelEditor({ recording, onCancel }: Props) {
             regionMgr.loadRegions(segments, regions);
             alignment.runAlignment();
             regionMgr.refreshRegionsState();
+          } else {
+            // No segments loaded. Make sure we still add the start pointer!
+            regionMgr.recreateStartPointer(regions, 0);
+            regionMgr.refreshRegionsState();
           }
         });
       }
@@ -85,7 +93,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
       // 恢復選取狀態
       if (savedSelectionTimeRef.current !== null) {
-        const found = regions.getRegions().find(
+        const found = regions.getRegions().filter((r) => r.id !== 'start-pointer').find(
           (r: Region) =>
             savedSelectionTimeRef.current! >= r.start &&
             savedSelectionTimeRef.current! <= r.end
@@ -149,11 +157,13 @@ export function LabelEditor({ recording, onCancel }: Props) {
   // ── 存檔 / 載入 ──
   const persistence = useLabelPersistence(recording);
 
-  // ── 選中箭頭顯示 ──
+  // ── 選中箭頭與開始指標顯示 ──
   useEffect(() => {
     if (!wavesurfer.regionsRef.current) return;
     const all = wavesurfer.regionsRef.current.getRegions();
-    all.forEach((r: Region) => {
+
+    const phonemes = all.filter((r) => r.id !== 'start-pointer');
+    phonemes.forEach((r: Region) => {
       if (!r.element) return;
       let arrow = r.element.querySelector('.region-selected-arrow') as HTMLElement | null;
       if (regionMgr.selectedRegionIds.has(r.id)) {
@@ -178,7 +188,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
           r.element.removeChild(arrow);
           const label = getRegionLabel(r);
           const isWarning = label === '!';
-          const idx = all.indexOf(r);
+          const idx = phonemes.indexOf(r);
           const level = idx !== -1 ? idx % 2 : 0;
           r.element.style.backgroundColor = isWarning
             ? 'rgba(255, 0, 0, 0.2)'
@@ -188,7 +198,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
         }
       }
     });
-  }, [regionMgr.selectedRegionIds, regionMgr.regionItems]);
+  }, [regionMgr.selectedRegionIds, regionMgr.regionItems, wavesurfer.isLoaded]);
 
   // ── save status 自動清除 ──
   useEffect(() => {
@@ -219,7 +229,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
     const time = ws.getCurrentTime();
     const eps = 0.01;
-    const all = regions.getRegions().sort((a: Region, b: Region) => a.start - b.start);
+    const all = regions.getRegions().filter((r) => r.id !== 'start-pointer').sort((a: Region, b: Region) => a.start - b.start);
     if (all.length === 0) return;
 
     let target: Region | undefined;
@@ -300,12 +310,12 @@ export function LabelEditor({ recording, onCancel }: Props) {
       return;
     }
 
-    let startTime = ws.getCurrentTime();
+    let startTime = regionMgr.startPointerTime;
     if (startTime >= ws.getDuration() - 0.05) {
       startTime = 0;
     }
     audio.playFull(startTime);
-  }, [audio, wavesurfer.wavesurferRef, regionMgr.selectedRegionIds]);
+  }, [audio, wavesurfer.wavesurferRef, regionMgr.selectedRegionIds, regionMgr.startPointerTime]);
 
   const handleSave = useCallback(async () => {
     const segments = regionMgr.getCurrentSegments();
