@@ -42,26 +42,68 @@ interface Props {
 
 export function LabelEditor({ recording, onCancel }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const waveformContainerRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [containerHeight, setContainerHeight] = useState<number>(0);
   
   const savedTimeRef = useRef<number>(0);
   const savedSelectionTimeRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lyrics = recording.lyrics || '';
+  const lastUrlRef = useRef<string>('');
+
+  // Track the actual height of the waveform container
+  useEffect(() => {
+    const el = waveformContainerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      const height = el.clientHeight;
+      if (height > 0) {
+        setContainerHeight(height);
+      }
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const defaultHeight = isFullscreen ? 800 : 280;
+  const actualHeight = containerHeight > 0 ? containerHeight : defaultHeight;
+
+  let waveformHeight = Math.floor(actualHeight * 0.35);
+  let spectrogramHeight = actualHeight - waveformHeight - 4;
+
+  if (waveformHeight < 60) {
+    waveformHeight = 60;
+  }
+  if (spectrogramHeight < 100) {
+    spectrogramHeight = 100;
+  }
 
   // ── 顯示層：WaveSurfer (靜音) ──
   const wavesurfer = useWaveSurfer({
     containerRef,
     url: recording.url,
-    waveformHeight: isFullscreen ? 300 : 100,
-    spectrogramHeight: isFullscreen ? 500 : 180,
+    waveformHeight,
+    spectrogramHeight,
     onReady: (ws, regions) => {
       const duration = ws.getDuration();
 
-      // Reset start pointer to 0 when loading a new file
-      regionMgr.setStartPointerTime(0);
+      // Track last url to only reset start pointer when loading a new file
+      const isNewFile = lastUrlRef.current !== recording.url;
+      lastUrlRef.current = recording.url;
+
+      if (isNewFile) {
+        regionMgr.setStartPointerTime(0);
+      }
+
+      // Listen to timeupdate to save time
+      ws.on('timeupdate', (time) => {
+        savedTimeRef.current = time;
+      });
 
       const currentSegments = regionMgr.getCurrentSegments();
 
@@ -151,6 +193,15 @@ export function LabelEditor({ recording, onCancel }: Props) {
     persistence.setIsDirty(true);
     persistence.setSaveStatus('idle');
   });
+
+  // 讓 savedSelectionTimeRef 永遠與 regionMgr.selectedRegion 同步
+  useEffect(() => {
+    if (regionMgr.selectedRegion) {
+      savedSelectionTimeRef.current = (regionMgr.selectedRegion.start + regionMgr.selectedRegion.end) / 2;
+    } else {
+      savedSelectionTimeRef.current = null;
+    }
+  }, [regionMgr.selectedRegion]);
 
   // ── 歌詞對齊 ──
   const alignment = useLyricsAlignment(wavesurfer.regionsRef, lyrics, recording.filename);
@@ -393,7 +444,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
 
       <div className="label-editor__main">
         <div className="label-editor__panel">
-          <div className="label-editor__waveform-container">
+          <div className="label-editor__waveform-container" ref={waveformContainerRef}>
             <div
               id="label-editor-waveform"
               ref={containerRef}
