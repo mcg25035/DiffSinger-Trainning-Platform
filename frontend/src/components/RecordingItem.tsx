@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, memo } from 'react';
 import type { Recording } from '../hooks/useAudioMonitor';
 import { validateLyrics } from '../utils/dictionary';
+import { LyricsMarkerList } from './LyricsMarkerList';
 
 interface Props {
   recording: Recording;
@@ -597,18 +598,11 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
               </button>
             </div>
           ) : (
-            <div style={{ 
-                fontSize: '10px', 
-                color: recording.isPending ? '#ffca28' : '#00e676', 
-                opacity: 0.8, 
-                fontStyle: 'italic', 
-                paddingLeft: '28px',
-                lineHeight: '1.4',
-                wordBreak: 'break-word'
-            }}>
-              {recording.isPending && "⚠️ [AI] "}
-              {recording.lyrics}
-            </div>
+            <LyricsMarkerList
+              lyrics={recording.lyrics || ''}
+              filename={recording.filename}
+              isPending={recording.isPending}
+            />
           )}
         </div>
       )}
