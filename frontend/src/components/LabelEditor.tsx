@@ -27,6 +27,7 @@ import { useLabelPersistence } from '../hooks/useLabelPersistence';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { getRegionLabel } from '../utils/regionStyle';
 import { loadWordAlignmentMap } from '../utils/alignmentStorage';
+import { focusAndMoveCursorToEnd } from '../utils/domUtils';
 import { LabelToolbar } from './label-editor/LabelToolbar';
 import { PhonemeEditPanel } from './label-editor/PhonemeEditPanel';
 import { RegionButtonTrack } from './label-editor/RegionButtonTrack';
@@ -359,12 +360,7 @@ export function LabelEditor({ recording, onCancel }: Props) {
     onDelete: () => regionMgr.deleteSelected(),
     onUndo: () => regionMgr.undo(),
     onFocusInput: () => {
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-          inputRef.current.select();
-        }
-      }, 50);
+      focusAndMoveCursorToEnd(inputRef.current, 50);
     },
   });
 

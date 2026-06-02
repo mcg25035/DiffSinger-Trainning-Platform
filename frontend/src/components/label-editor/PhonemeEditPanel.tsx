@@ -3,6 +3,7 @@
  */
 
 import type { Region } from 'wavesurfer.js/plugins/regions';
+import { focusAndMoveCursorToEnd } from '../../utils/domUtils';
 
 interface Props {
   selectedRegion: Region | null;
@@ -60,6 +61,7 @@ export function PhonemeEditPanel({
           if (e.key === 'Enter') onUpdate();
           if (e.key === 'Escape') onDeselect();
         }}
+        onFocus={(e) => focusAndMoveCursorToEnd(e.target, 0)}
       />
       <button onClick={onUpdate} className="phoneme-edit__btn phoneme-edit__btn--ok">OK</button>
       <button onClick={onPlay} className="phoneme-edit__btn phoneme-edit__btn--play">PLAY</button>
