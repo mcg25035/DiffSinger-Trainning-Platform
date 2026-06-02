@@ -15,6 +15,8 @@ export interface KeyboardHandlers {
   onDelete: () => void;
   onUndo: () => void;
   onFocusInput?: () => void;
+  onArrowLeft?: () => void;
+  onArrowRight?: () => void;
 }
 
 export function useKeyboardShortcuts(handlers: KeyboardHandlers): void {
@@ -66,6 +68,14 @@ export function useKeyboardShortcuts(handlers: KeyboardHandlers): void {
         e.preventDefault();
         e.stopPropagation();
         handlersRef.current.onDelete();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        handlersRef.current.onArrowLeft?.();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        handlersRef.current.onArrowRight?.();
       }
     };
 

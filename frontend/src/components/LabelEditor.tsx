@@ -402,6 +402,66 @@ export function LabelEditor({ recording, onCancel }: Props) {
     setIsFullscreen((prev) => !prev);
   }, [wavesurfer.wavesurferRef, regionMgr.selectedRegion, audio.isPlayingRef]);
 
+  const handleSelectPrevPhoneme = useCallback(() => {
+    const ws = wavesurfer.wavesurferRef.current;
+    const regions = wavesurfer.regionsRef.current;
+    if (!ws || !regions || !regionMgr.selectedRegion) return;
+
+    const all = regions
+      .getRegions()
+      .filter((r) => r.id !== 'start-pointer')
+      .sort((a: Region, b: Region) => a.start - b.start);
+    
+    const idx = all.findIndex((r) => r.id === regionMgr.selectedRegion!.id);
+    if (idx > 0) {
+      const prevRegion = all[idx - 1];
+      regionMgr.setSelectedRegion(prevRegion);
+      regionMgr.setEditLabel(getRegionLabel(prevRegion));
+
+      // 捲動到該 region 的位置
+      const duration = ws.getDuration();
+      if (duration > 0) {
+        const center = (prevRegion.start + prevRegion.end) / 2;
+        const wrapper = ws.getWrapper();
+        const scrollWidth = wrapper.scrollWidth;
+        const clientWidth = wrapper.clientWidth;
+        const targetScroll =
+          (center / duration) * scrollWidth - clientWidth / 2;
+        wrapper.scrollTo({ left: targetScroll, behavior: 'smooth' });
+      }
+    }
+  }, [wavesurfer.wavesurferRef, wavesurfer.regionsRef, regionMgr]);
+
+  const handleSelectNextPhoneme = useCallback(() => {
+    const ws = wavesurfer.wavesurferRef.current;
+    const regions = wavesurfer.regionsRef.current;
+    if (!ws || !regions || !regionMgr.selectedRegion) return;
+
+    const all = regions
+      .getRegions()
+      .filter((r) => r.id !== 'start-pointer')
+      .sort((a: Region, b: Region) => a.start - b.start);
+    
+    const idx = all.findIndex((r) => r.id === regionMgr.selectedRegion!.id);
+    if (idx !== -1 && idx < all.length - 1) {
+      const nextRegion = all[idx + 1];
+      regionMgr.setSelectedRegion(nextRegion);
+      regionMgr.setEditLabel(getRegionLabel(nextRegion));
+
+      // 捲動到該 region 的位置
+      const duration = ws.getDuration();
+      if (duration > 0) {
+        const center = (nextRegion.start + nextRegion.end) / 2;
+        const wrapper = ws.getWrapper();
+        const scrollWidth = wrapper.scrollWidth;
+        const clientWidth = wrapper.clientWidth;
+        const targetScroll =
+          (center / duration) * scrollWidth - clientWidth / 2;
+        wrapper.scrollTo({ left: targetScroll, behavior: 'smooth' });
+      }
+    }
+  }, [wavesurfer.wavesurferRef, wavesurfer.regionsRef, regionMgr]);
+
   // ── 快捷鍵 ──
   useKeyboardShortcuts({
     onStop: () => audio.stop(),
@@ -413,6 +473,8 @@ export function LabelEditor({ recording, onCancel }: Props) {
     onFocusInput: () => {
       focusAndMoveCursorToEnd(inputRef.current, 50);
     },
+    onArrowLeft: handleSelectPrevPhoneme,
+    onArrowRight: handleSelectNextPhoneme,
   });
 
   // ── 渲染 ──

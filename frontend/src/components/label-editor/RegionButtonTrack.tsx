@@ -2,6 +2,7 @@
  * RegionButtonTrack — 水平捲動的 region 按鈕列表與單詞歸屬下拉選單
  */
 
+import { useRef, useEffect } from 'react';
 import type WaveSurfer from 'wavesurfer.js';
 import type { RegionItem } from '../../hooks/useRegionManager';
 import { isSilentLabel, getValidWordIndexRange } from '../../utils/alignmentEngine';
@@ -26,6 +27,17 @@ export function RegionButtonTrack({
   onWordIndexChange,
 }: Props) {
   const words = lyrics.split(/\s+/).filter((w) => w.length > 0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (selectedIds.size !== 1) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const selectedEl = container.querySelector('.region-track__btn--selected');
+    if (selectedEl) {
+      selectedEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }, [selectedIds]);
 
   const handleClick = (item: RegionItem, e: React.MouseEvent) => {
     onSelect(item, e);
@@ -47,7 +59,7 @@ export function RegionButtonTrack({
   };
 
   return (
-    <div className="region-track">
+    <div className="region-track" ref={containerRef}>
       {items.map((item, idx) => {
         const isPlayingThis =
           activePlayRange &&
