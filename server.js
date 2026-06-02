@@ -486,6 +486,50 @@ app.post('/api/align', express.json(), async (req, res) => {
 
 const IS_PROD = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod';
 
+const fingerprintPath = path.join(__dirname, 'mms_service/data/last_trained_fingerprint.txt');
+
+function getDatasetFingerprint() {
+    try {
+        const files = fs.readdirSync(segmentsDir);
+        const parts = [];
+        for (const file of files) {
+            if (file.endsWith('.wav')) {
+                const wavPath = path.join(segmentsDir, file);
+                const checkedPath = wavPath.replace(/\.wav$/, '.checked');
+                const labPath = wavPath.replace(/\.wav$/, '.lab');
+                if (fs.existsSync(checkedPath) && fs.existsSync(labPath)) {
+                    const stat = fs.statSync(wavPath);
+                    parts.push(`${file}:${stat.size}:${stat.mtimeMs}`);
+                }
+            }
+        }
+        parts.sort();
+        return parts.join('|');
+    } catch (e) {
+        console.error('[MMS-TRAIN] Failed to generate dataset fingerprint:', e.message);
+        return null;
+    }
+}
+
+function getLastTrainedFingerprint() {
+    if (fs.existsSync(fingerprintPath)) {
+        try {
+            return fs.readFileSync(fingerprintPath, 'utf-8').trim();
+        } catch (e) {
+            console.error('[MMS-TRAIN] Failed to read last fingerprint file:', e.message);
+        }
+    }
+    return null;
+}
+
+function saveLastTrainedFingerprint(fingerprint) {
+    try {
+        fs.writeFileSync(fingerprintPath, fingerprint, 'utf-8');
+    } catch (e) {
+        console.error('[MMS-TRAIN] Failed to save fingerprint file:', e.message);
+    }
+}
+
 async function syncAndTrain(options = {}) {
     const { epochs, lr, dictionaryId } = options;
     const mmsTrainDataDir = path.join(__dirname, 'mms_service/data/training_data');
@@ -571,6 +615,13 @@ async function syncAndTrain(options = {}) {
     
     console.log(`[MMS-TRAIN] Synced ${count} segments for training.`);
     const result = await mmsService.train(epochs || 20, lr || 0.001);
+    
+    // 成功觸發訓練後存入指紋
+    const currentFingerprint = getDatasetFingerprint();
+    if (currentFingerprint) {
+        saveLastTrainedFingerprint(currentFingerprint);
+    }
+    
     return { count, result };
 }
 
@@ -601,6 +652,17 @@ if (IS_PROD) {
                 console.log('[MMS-AUTO-TRAIN] Service is already training or paused. Skip.');
                 return;
             }
+            
+            // 檢查訓練集指紋是否與上次相同且權重檔依然存在
+            const currentFingerprint = getDatasetFingerprint();
+            const lastFingerprint = getLastTrainedFingerprint();
+            const weightsExist = fs.existsSync(path.join(__dirname, 'mms_service/data/weights/mms_fine_tuned_head.pth'));
+            
+            if (weightsExist && currentFingerprint && lastFingerprint && currentFingerprint === lastFingerprint) {
+                console.log('[MMS-AUTO-TRAIN] Training dataset fingerprint is unchanged. Skip auto-training.');
+                return;
+            }
+            
             const { count } = await syncAndTrain();
             console.log(`[MMS-AUTO-TRAIN] Auto-training triggered successfully with ${count} segments.`);
         } catch (err) {
