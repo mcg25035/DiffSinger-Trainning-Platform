@@ -4,6 +4,7 @@ import shutil
 import logging
 import threading
 import json
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -43,6 +44,10 @@ logger.info("Loading MMS_FA Model bundle...")
 bundle = torchaudio.pipelines.MMS_FA
 model = bundle.get_model()
 model.to(device)
+
+# Save a copy of the original base (zero-shot) weights of the CTC head
+base_head_state_dict = {k: v.cpu().clone() for k, v in model.model.aux.state_dict().items()}
+
 tokenizer = bundle.get_tokenizer()
 dictionary = bundle.get_dict()
 aligner = bundle.get_aligner()
@@ -51,10 +56,12 @@ FRAME_DURATION_S = 320 / 16000.0
 # Threading locks
 model_lock = threading.Lock()
 training_lock = threading.Lock()
+align_counter_lock = threading.Lock()
+active_align_requests = 0
 
 # Global Training State
 training_state = {
-    "status": "idle",       # "idle", "training", "error"
+    "status": "idle",       # "idle", "training", "paused", "error"
     "current_epoch": 0,
     "total_epochs": 0,
     "current_loss": 0.0,
@@ -107,8 +114,8 @@ def run_training_loop(epochs: int, lr: float):
     global training_state
     
     with training_lock:
-        if training_state["status"] == "training":
-            logger.warning("Training is already running, skipping execution.")
+        if training_state["status"] in ("training", "paused"):
+            logger.warning("Training is already running or paused, skipping execution.")
             return
         training_state["status"] = "training"
         training_state["current_epoch"] = 0
@@ -185,6 +192,24 @@ def run_training_loop(epochs: int, lr: float):
         for epoch in range(epochs):
             epoch_loss = 0.0
             for item in dataset:
+                # Pause training if there are active alignment requests
+                paused_logged = False
+                while True:
+                    with align_counter_lock:
+                        if active_align_requests == 0:
+                            break
+                    if not paused_logged:
+                        with training_lock:
+                            training_state["status"] = "paused"
+                        logger.info("Training paused to yield to active MMS alignment requests...")
+                        paused_logged = True
+                    time.sleep(0.5)
+                
+                if paused_logged:
+                    with training_lock:
+                        training_state["status"] = "training"
+                    logger.info("Training resumed.")
+
                 # Keep lock during forward/backward steps to prevent inference conflicts
                 with model_lock:
                     model.train()
@@ -251,9 +276,39 @@ def align_audio_to_phonemes(waveform: torch.Tensor, sr: int, phonemes: List[str]
     token_ids = tokenizer(cleaned_phonemes)
     
     with model_lock:
+        training_head_backup = None
+        is_training_active = False
+        with training_lock:
+            if training_state["status"] in ("training", "paused"):
+                is_training_active = True
+                
+        if is_training_active:
+            # Training is active: backup training weights and load stable weights
+            training_head_backup = {k: v.cpu().clone() for k, v in model.model.aux.state_dict().items()}
+            if MODEL_WEIGHTS_PATH.exists():
+                try:
+                    state_dict = torch.load(MODEL_WEIGHTS_PATH, map_location=device)
+                    model.model.aux.load_state_dict(state_dict)
+                except Exception as e:
+                    logger.error(f"Failed to load stable weights during training pause: {e}")
+            else:
+                model.model.aux.load_state_dict({k: v.to(device) for k, v in base_head_state_dict.items()})
+        else:
+            # Training is NOT active: load stable weights (just in case they changed on disk)
+            if MODEL_WEIGHTS_PATH.exists():
+                try:
+                    state_dict = torch.load(MODEL_WEIGHTS_PATH, map_location=device)
+                    model.model.aux.load_state_dict(state_dict)
+                except Exception as e:
+                    logger.error(f"Failed to load stable weights: {e}")
+
         model.eval()
         with torch.inference_mode():
             emissions, _ = model(waveform)
+            
+        if training_head_backup is not None:
+            model.model.aux.load_state_dict({k: v.to(device) for k, v in training_head_backup.items()})
+            
         spans = aligner(emissions[0], token_ids)
         
     final_segs = []
@@ -349,10 +404,10 @@ async def trigger_training(
 ):
     """Manually triggers background fine-tuning."""
     with training_lock:
-        if training_state["status"] == "training":
+        if training_state["status"] in ("training", "paused"):
             return JSONResponse(
                 status_code=400,
-                content={"message": "Training is already in progress.", "status": training_state}
+                content={"message": "Training is already in progress or paused.", "status": training_state}
             )
             
     background_tasks.add_task(run_training_loop, epochs, lr)
@@ -370,38 +425,43 @@ async def align(
     lyrics: str = Form(...)
 ):
     """Aligned audio to lyrics using the latest available fine-tuned (or pretrained) model."""
-    if not audio.filename.lower().endswith(".wav"):
-        raise HTTPException(status_code=400, detail="Only WAV audio files are supported.")
-        
-    phonemes = parse_lyrics_to_phonemes(lyrics)
-    if not phonemes:
-        raise HTTPException(status_code=400, detail="No valid phonemes provided in lyrics.")
-        
-    temp_id = uuid.uuid4().hex
-    temp_wav = DATA_DIR / f"temp_{temp_id}.wav"
-    
+    global active_align_requests
+    with align_counter_lock:
+        active_align_requests += 1
+
     try:
-        with temp_wav.open("wb") as buffer:
-            shutil.copyfileobj(audio.file, buffer)
+        if not audio.filename.lower().endswith(".wav"):
+            raise HTTPException(status_code=400, detail="Only WAV audio files are supported.")
             
-        waveform, sr = torchaudio.load(str(temp_wav))
+        phonemes = parse_lyrics_to_phonemes(lyrics)
+        if not phonemes:
+            raise HTTPException(status_code=400, detail="No valid phonemes provided in lyrics.")
+            
+        temp_id = uuid.uuid4().hex
+        temp_wav = DATA_DIR / f"temp_{temp_id}.wav"
         
-        # Load the latest model parameters (just in case they have changed)
-        load_latest_weights()
-        
-        alignment = align_audio_to_phonemes(waveform, sr, phonemes)
-        
-        return {
-            "filename": audio.filename,
-            "phonemes": phonemes,
-            "alignment": alignment
-        }
-    except Exception as e:
-        logger.error(f"Alignment failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Alignment failed: {e}")
+        try:
+            with temp_wav.open("wb") as buffer:
+                shutil.copyfileobj(audio.file, buffer)
+                
+            waveform, sr = torchaudio.load(str(temp_wav))
+            
+            alignment = align_audio_to_phonemes(waveform, sr, phonemes)
+            
+            return {
+                "filename": audio.filename,
+                "phonemes": phonemes,
+                "alignment": alignment
+            }
+        except Exception as e:
+            logger.error(f"Alignment failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Alignment failed: {e}")
+        finally:
+            if temp_wav.exists():
+                temp_wav.unlink()
     finally:
-        if temp_wav.exists():
-            temp_wav.unlink()
+        with align_counter_lock:
+            active_align_requests -= 1
 
 @app.post("/align_batch")
 async def align_batch(
@@ -409,54 +469,62 @@ async def align_batch(
     lyrics_json: str = Form(...)
 ):
     """Aligns a batch of wav files to their respective lyrics/phonemes list."""
+    global active_align_requests
+    with align_counter_lock:
+        active_align_requests += 1
+
     try:
-        lyrics_dict = json.loads(lyrics_json)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid lyrics_json: {e}")
-        
-    results = {}
-    # Load the latest model parameters (just in case they have changed)
-    load_latest_weights()
-    
-    for wav_file in wavs:
-        filename = wav_file.filename
-        if filename not in lyrics_dict:
-            results[filename] = f"ERROR: Missing lyrics for {filename}"
-            continue
-            
-        lyrics_str = lyrics_dict[filename]
-        phonemes = parse_lyrics_to_phonemes(lyrics_str)
-        if not phonemes:
-            results[filename] = "ERROR: No valid phonemes provided in lyrics."
-            continue
-            
-        temp_id = uuid.uuid4().hex
-        temp_wav = DATA_DIR / f"temp_batch_{temp_id}.wav"
-        
         try:
-            with temp_wav.open("wb") as buffer:
-                shutil.copyfileobj(wav_file.file, buffer)
-                
-            waveform, sr = torchaudio.load(str(temp_wav))
-            
-            alignment = align_audio_to_phonemes(waveform, sr, phonemes)
-            
-            # Format in the HTK-like format with times in 100ns (1e-7 s)
-            lines = []
-            for seg in alignment:
-                # seg["start"] is in ms. Convert to 100ns: ms * 10000
-                start_100ns = int(seg["start"] * 10000)
-                end_100ns = int(seg["end"] * 10000)
-                lines.append(f"{start_100ns} {end_100ns} {seg['label']}")
-            lines.append("# STATUS: SUCCESS")
-            results[filename] = "\n".join(lines)
-            
+            lyrics_dict = json.loads(lyrics_json)
         except Exception as e:
-            logger.error(f"Alignment failed for {filename}: {e}")
-            results[filename] = f"ERROR: {e}"
-        finally:
-            if temp_wav.exists():
-                temp_wav.unlink()
+            raise HTTPException(status_code=400, detail=f"Invalid lyrics_json: {e}")
+            
+        results = {}
+        
+        for wav_file in wavs:
+            filename = wav_file.filename
+            if filename not in lyrics_dict:
+                results[filename] = f"ERROR: Missing lyrics for {filename}"
+                continue
+                
+            lyrics_str = lyrics_dict[filename]
+            phonemes = parse_lyrics_to_phonemes(lyrics_str)
+            if not phonemes:
+                results[filename] = "ERROR: No valid phonemes provided in lyrics."
+                continue
+                
+            temp_id = uuid.uuid4().hex
+            temp_wav = DATA_DIR / f"temp_batch_{temp_id}.wav"
+            
+            try:
+                with temp_wav.open("wb") as buffer:
+                    shutil.copyfileobj(wav_file.file, buffer)
+                    
+                waveform, sr = torchaudio.load(str(temp_wav))
+                
+                alignment = align_audio_to_phonemes(waveform, sr, phonemes)
+                
+                # Format in the HTK-like format with times in 100ns (1e-7 s)
+                lines = []
+                for seg in alignment:
+                    # seg["start"] is in ms. Convert to 100ns: ms * 10000
+                    start_100ns = int(seg["start"] * 10000)
+                    end_100ns = int(seg["end"] * 10000)
+                    lines.append(f"{start_100ns} {end_100ns} {seg['label']}")
+                lines.append("# STATUS: SUCCESS")
+                results[filename] = "\n".join(lines)
+                
+            except Exception as e:
+                logger.error(f"Alignment failed for {filename}: {e}")
+                results[filename] = f"ERROR: {e}"
+            finally:
+                if temp_wav.exists():
+                    temp_wav.unlink()
+                    
+        return results
+    finally:
+        with align_counter_lock:
+            active_align_requests -= 1
                 
     return results
 

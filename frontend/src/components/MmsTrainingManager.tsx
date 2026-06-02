@@ -11,7 +11,7 @@ interface TrainingHistoryItem {
 }
 
 interface TrainingStatus {
-  status: 'idle' | 'training' | 'error';
+  status: 'idle' | 'training' | 'paused' | 'error';
   current_epoch: number;
   total_epochs: number;
   current_loss: number;
@@ -91,7 +91,7 @@ export function MmsTrainingManager({ onClose, dictionaryId }: MmsTrainingManager
     }
   };
 
-  const isTraining = statusData?.status === 'training';
+  const isTraining = statusData?.status === 'training' || statusData?.status === 'paused';
 
   return (
     <div style={{
@@ -211,7 +211,7 @@ export function MmsTrainingManager({ onClose, dictionaryId }: MmsTrainingManager
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#888' }}>Fine-tuning Status:</span>
                 <span style={{
-                  color: statusData?.status === 'training' ? '#2979ff' : statusData?.status === 'error' ? '#ff4d4d' : '#888',
+                  color: statusData?.status === 'training' ? '#2979ff' : statusData?.status === 'paused' ? '#ff9100' : statusData?.status === 'error' ? '#ff4d4d' : '#888',
                   fontWeight: 'bold',
                   textTransform: 'uppercase'
                 }}>
@@ -251,7 +251,7 @@ export function MmsTrainingManager({ onClose, dictionaryId }: MmsTrainingManager
               transition: 'transform 0.2s, opacity 0.2s'
             }}
           >
-            {isSyncing ? 'Syncing segments...' : isTraining ? 'Fine-Tuning in Progress...' : 'Sync & Start Fine-Tuning'}
+            {isSyncing ? 'Syncing segments...' : statusData?.status === 'paused' ? 'Fine-Tuning Paused...' : isTraining ? 'Fine-Tuning in Progress...' : 'Sync & Start Fine-Tuning'}
           </button>
         </div>
 
@@ -260,8 +260,8 @@ export function MmsTrainingManager({ onClose, dictionaryId }: MmsTrainingManager
           <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700', textTransform: 'uppercase', color: '#888', display: 'flex', justifyContent: 'space-between' }}>
             <span>Training Log</span>
             {isTraining && statusData && (
-              <span style={{ color: '#2979ff' }}>
-                Epoch {statusData.current_epoch}/{statusData.total_epochs}
+              <span style={{ color: statusData.status === 'paused' ? '#ff9100' : '#2979ff' }}>
+                {statusData.status === 'paused' ? 'Paused (yielding to align)' : `Epoch ${statusData.current_epoch}/${statusData.total_epochs}`}
               </span>
             )}
           </h3>

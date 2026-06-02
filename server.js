@@ -482,91 +482,136 @@ app.post('/api/align', express.json(), async (req, res) => {
     res.json({ jobId });
 });
 
-// --- MMS-FA Fine-tuning / Training endpoints ---
+// --- MMS-FA Fine-tuning / Training endpoints & Cron ---
+
+const IS_PROD = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod';
+
+async function syncAndTrain(options = {}) {
+    const { epochs, lr, dictionaryId } = options;
+    const mmsTrainDataDir = path.join(__dirname, 'mms_service/data/training_data');
+    
+    // Ensure directory exists and is empty
+    if (fs.existsSync(mmsTrainDataDir)) {
+        const files = fs.readdirSync(mmsTrainDataDir);
+        for (const file of files) {
+            fs.unlinkSync(path.join(mmsTrainDataDir, file));
+        }
+    } else {
+        fs.mkdirSync(mmsTrainDataDir, { recursive: true });
+    }
+    
+    // Load mapping
+    let mapping = null;
+    let targetDictId = dictionaryId;
+    
+    if (!targetDictId) {
+        try {
+            const files = fs.readdirSync(path.join(__dirname, 'dictionaries')).filter(f => f.endsWith('.json'));
+            if (files.length > 0) {
+                targetDictId = files[0].replace('.json', '');
+            }
+        } catch (e) {
+            console.error('[MMS-TRAIN] Failed to auto-detect dictionary:', e.message);
+        }
+    }
+    
+    if (targetDictId) {
+        const dictPath = path.join(__dirname, 'dictionaries', `${targetDictId}.json`);
+        if (fs.existsSync(dictPath)) {
+            const dict = JSON.parse(fs.readFileSync(dictPath, 'utf-8'));
+            const modelName = dict.mfa_model || 'japanese_mfa';
+            const mappingPath = path.join(mappingsDir, `${modelName}.json`);
+            if (fs.existsSync(mappingPath)) {
+                mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf-8'));
+            }
+        }
+    }
+    
+    const files = fs.readdirSync(segmentsDir);
+    let count = 0;
+    
+    for (const file of files) {
+        if (file.endsWith('.wav')) {
+            const labFile = file.replace(/\.wav$/, '.lab');
+            const labPath = path.join(segmentsDir, labFile);
+            const wavPath = path.join(segmentsDir, file);
+            const checkedPath = wavPath.replace(/\.wav$/, '.checked');
+            
+            // 只有打勾選中的片段（存在 .checked 檔案）且已有對齊資料（.lab）的片段才加入訓練
+            if (!fs.existsSync(checkedPath)) {
+                continue;
+            }
+            
+            if (fs.existsSync(labPath)) {
+                const labContent = fs.readFileSync(labPath, 'utf-8');
+                const phonemes = labContent.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => line && !line.startsWith('#'))
+                    .map(line => {
+                        const parts = line.split(/\s+/);
+                        return parts[2];
+                    })
+                    .filter(phone => phone && !['pau', 'br', 'sp', 'sil', 'spn'].includes(phone));
+                    
+                if (phonemes.length > 0) {
+                    const targetWavPath = path.join(mmsTrainDataDir, file);
+                    const targetLabPath = path.join(mmsTrainDataDir, labFile);
+                    
+                    fs.copyFileSync(wavPath, targetWavPath);
+                    fs.writeFileSync(targetLabPath, phonemes.join(' '));
+                    count++;
+                }
+            }
+        }
+    }
+    
+    if (count === 0) {
+        throw new Error('No valid training segments (WAV + LAB pairs) checked.');
+    }
+    
+    console.log(`[MMS-TRAIN] Synced ${count} segments for training.`);
+    const result = await mmsService.train(epochs || 20, lr || 0.001);
+    return { count, result };
+}
 
 app.post('/api/mms/sync-train', express.json(), async (req, res) => {
     const { epochs, lr, dictionaryId } = req.body;
-    const mmsTrainDataDir = path.join(__dirname, 'mms_service/data/training_data');
-    
     try {
-        // Ensure directory exists and is empty
-        if (fs.existsSync(mmsTrainDataDir)) {
-            const files = fs.readdirSync(mmsTrainDataDir);
-            for (const file of files) {
-                fs.unlinkSync(path.join(mmsTrainDataDir, file));
-            }
-        } else {
-            fs.mkdirSync(mmsTrainDataDir, { recursive: true });
-        }
-        
-        // Load mapping
-        let mapping = null;
-        if (dictionaryId) {
-            const dictPath = path.join(__dirname, 'dictionaries', `${dictionaryId}.json`);
-            if (fs.existsSync(dictPath)) {
-                const dict = JSON.parse(fs.readFileSync(dictPath, 'utf-8'));
-                const modelName = dict.mfa_model || 'japanese_mfa';
-                const mappingPath = path.join(mappingsDir, `${modelName}.json`);
-                if (fs.existsSync(mappingPath)) {
-                    mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf-8'));
-                }
-            }
-        }
-        
-        const files = fs.readdirSync(segmentsDir);
-        let count = 0;
-        
-        for (const file of files) {
-            if (file.endsWith('.wav')) {
-                const labFile = file.replace(/\.wav$/, '.lab');
-                const labPath = path.join(segmentsDir, labFile);
-                const wavPath = path.join(segmentsDir, file);
-                const checkedPath = wavPath.replace(/\.wav$/, '.checked');
-                
-                // 只有打勾選中的片段（存在 .checked 檔案）且已有對齊資料（.lab）的片段才加入訓練
-                if (!fs.existsSync(checkedPath)) {
-                    continue;
-                }
-                
-                if (fs.existsSync(labPath)) {
-                    const labContent = fs.readFileSync(labPath, 'utf-8');
-                    const phonemes = labContent.split('\n')
-                        .map(line => line.trim())
-                        .filter(line => line && !line.startsWith('#'))
-                        .map(line => {
-                            const parts = line.split(/\s+/);
-                            return parts[2];
-                        })
-                        .filter(phone => phone && !['pau', 'br', 'sp', 'sil', 'spn'].includes(phone));
-                        
-                    if (phonemes.length > 0) {
-                        const targetWavPath = path.join(mmsTrainDataDir, file);
-                        const targetLabPath = path.join(mmsTrainDataDir, labFile);
-                        
-                        fs.copyFileSync(wavPath, targetWavPath);
-                        fs.writeFileSync(targetLabPath, phonemes.join(' '));
-                        count++;
-                    }
-                }
-            }
-        }
-        
-        if (count === 0) {
-            return res.status(400).json({ error: 'No valid training segments (WAV + LAB pairs) found.' });
-        }
-        
-        console.log(`[MMS-TRAIN] Synced ${count} segments for training.`);
-        const result = await mmsService.train(epochs || 20, lr || 0.001);
+        const { count, result } = await syncAndTrain({ epochs, lr, dictionaryId });
         res.json({
             message: `Successfully synced ${count} segments. Fine-tuning started in the background.`,
             status: result.status || 'started'
         });
-        
     } catch (err) {
         console.error(`[MMS-TRAIN] Sync and train failed:`, err.message);
         res.status(500).json({ error: err.message });
     }
 });
+
+// 非 dev 的正式環境：定期檢查並跑客製化微調
+if (IS_PROD) {
+    console.log('[MMS-AUTO-TRAIN] Production mode. Scheduling periodic auto-training check.');
+    
+    const runCheck = async () => {
+        console.log('[MMS-AUTO-TRAIN] Running periodic check...');
+        try {
+            // 先確認目前是否已經在跑訓練或處於暫停狀態
+            const status = await mmsService.getStatus();
+            if (status && (status.status === 'training' || status.status === 'paused')) {
+                console.log('[MMS-AUTO-TRAIN] Service is already training or paused. Skip.');
+                return;
+            }
+            const { count } = await syncAndTrain();
+            console.log(`[MMS-AUTO-TRAIN] Auto-training triggered successfully with ${count} segments.`);
+        } catch (err) {
+            console.log('[MMS-AUTO-TRAIN] Auto-training check completed:', err.message);
+        }
+    };
+
+    // 啟動 10 秒後先跑第一次檢查，之後每小時跑一次
+    setTimeout(runCheck, 10000);
+    setInterval(runCheck, 3600000); // 1小時 = 3,600,000 ms
+}
 
 app.get('/api/mms/status', async (req, res) => {
     try {

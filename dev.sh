@@ -115,7 +115,7 @@ log_ok "已發送 'up' 指令給 daemon"
 # ─── [3/4] 啟動 Node.js 後端 ───
 echo ""
 log_step "[3/4] 啟動 Node.js 後端 (port $BACKEND_PORT)..."
-node server.js &
+NODE_ENV=development node server.js &
 BACKEND_PID=$!
 log_ok "Node.js 後端已啟動 (PID: $BACKEND_PID)"
 
