@@ -41,6 +41,7 @@ echo "📋 查看 Docker 啟動進度: journalctl -u ds-platform -f"
 
 echo ""
 echo "🚀 啟動 Node.js 後端服務..."
+export NODE_ENV=production
 if command -v pm2 &> /dev/null; then
     pm2 delete diffsinger-platform 2>/dev/null || true
     pm2 start server.js --name diffsinger-platform
