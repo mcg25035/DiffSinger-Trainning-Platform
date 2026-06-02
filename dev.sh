@@ -96,6 +96,7 @@ fi
 BACKEND_PORT=${BACKEND_PORT:-3010}
 MFA_PORT=${MFA_PORT:-8001}
 LYRICS_PORT=${LYRICS_PORT:-8000}
+MMS_PORT=${MMS_PORT:-8002}
 VITE_PORT=${VITE_PORT:-5173}
 
 # ─── [1/4] 安裝相依套件 ───
@@ -131,6 +132,7 @@ echo -e "   🌐 前端 (Vite):   ${CYAN}http://localhost:${VITE_PORT}${NC}"
 echo -e "   ⚙️  後端 (API):    ${CYAN}http://localhost:${BACKEND_PORT}${NC}"
 echo -e "   🎤 MFA 服務:      ${CYAN}http://localhost:${MFA_PORT}${NC}"
 echo -e "   📝 Lyrics 服務:   ${CYAN}http://localhost:${LYRICS_PORT}${NC}"
+echo -e "   🔊 MMS 服務:      ${CYAN}http://localhost:${MMS_PORT}${NC}"
 echo ""
 echo -e "   ${CYAN}Docker 操作:${NC}"
 echo -e "     echo \"restart\" > $PIPE   # 重啟 Docker 服務"

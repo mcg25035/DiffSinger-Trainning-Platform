@@ -8,6 +8,7 @@ import { AudioSplitter } from './components/AudioSplitter';
 import { LabelEditor } from './components/LabelEditor';
 import { LyricsManager } from './components/LyricsManager';
 import { MappingManager } from './components/MappingManager';
+import { MmsTrainingManager } from './components/MmsTrainingManager';
 import { useState, memo, useCallback, useEffect } from 'react';
 import type { Dictionary } from './utils/dictionary';
 import './index.css';
@@ -46,6 +47,8 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
   const [selectedDictId, setSelectedDictId] = useState<string>('');
   const [showLyricsManager, setShowLyricsManager] = useState(false);
   const [showMappingManager, setShowMappingManager] = useState(false);
+  const [showMmsTraining, setShowMmsTraining] = useState(false);
+  const [selectedAligner, setSelectedAligner] = useState<string>('mfa');
 
   useEffect(() => {
     fetch('/api/dictionaries')
@@ -84,42 +87,79 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
         />
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-          <label style={{ fontSize: '11px', color: '#888', fontWeight: '900', letterSpacing: '1px' }}>VALIDATION LANGUAGE</label>
-          <select 
-            value={selectedDictId} 
-            onChange={e => setSelectedDictId(e.target.value)}
-            style={{ background: '#111', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '8px', fontSize: '12px', outline: 'none', width: '100%' }}
-          >
-            {dictionaries.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
+      {showMmsTraining && (
+        <MmsTrainingManager 
+          onClose={() => setShowMmsTraining(false)} 
+          dictionaryId={selectedDictId}
+        />
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+            <label style={{ fontSize: '11px', color: '#888', fontWeight: '900', letterSpacing: '1px' }}>VALIDATION LANGUAGE</label>
+            <select 
+              value={selectedDictId} 
+              onChange={e => setSelectedDictId(e.target.value)}
+              style={{ background: '#111', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '8px', fontSize: '12px', outline: 'none', width: '100%' }}
+            >
+              {dictionaries.map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+            <label style={{ fontSize: '11px', color: '#888', fontWeight: '900', letterSpacing: '1px' }}>ALIGNMENT METHOD</label>
+            <select 
+              value={selectedAligner} 
+              onChange={e => setSelectedAligner(e.target.value)}
+              style={{ background: '#111', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '8px', fontSize: '12px', outline: 'none', width: '100%' }}
+            >
+              <option value="mfa">MFA (Montreal)</option>
+              <option value="mms">MMS-FA (Meta)</option>
+            </select>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignSelf: 'end' }}>
-          <button 
-            onClick={() => setShowMappingManager(true)}
-            style={{ background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#2979ff', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-            title="MFA Mapping Manager"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-              <line x1="6" y1="6" x2="6.01" y2="6"></line>
-              <line x1="6" y1="18" x2="6.01" y2="18"></line>
-            </svg>
-          </button>
-          <button 
-            onClick={() => setShowLyricsManager(true)}
-            style={{ background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-            title="Dictionary Manager"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-            </svg>
-          </button>
+        
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '11px', color: '#666', fontWeight: 'bold', letterSpacing: '0.5px' }}>MANAGEMENT TOOLS</span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              onClick={() => setShowMappingManager(true)}
+              style={{ background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#2979ff', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              title="MFA Mapping Manager"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                <line x1="6" y1="18" x2="6.01" y2="18"></line>
+              </svg>
+            </button>
+            <button 
+              onClick={() => setShowLyricsManager(true)}
+              style={{ background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              title="Dictionary Manager"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+              </svg>
+            </button>
+            <button 
+              onClick={() => setShowMmsTraining(true)}
+              style={{ background: '#222', border: '1px solid #444', borderRadius: '8px', color: '#00e676', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              title="MMS-FA Custom Fine-Tuning"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path>
+                <path d="M12 6v12"></path>
+                <path d="M8 10h8"></path>
+                <path d="M8 14h8"></path>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -128,7 +168,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
            Raw Recordings ({rawRecordings.length})
          </h2>
          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-           <RecordingList recordings={rawRecordings} onSplit={onSplit} onLabel={onLabel} onRefresh={onRefresh} activeFilename={activeFilename} />
+           <RecordingList recordings={rawRecordings} onSplit={onSplit} onLabel={onLabel} onRefresh={onRefresh} activeFilename={activeFilename} aligner={selectedAligner} />
          </div>
       </div>
       <div style={{ height: '1px', background: '#333' }} />
@@ -137,7 +177,7 @@ const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefre
            Upload Segments ({uploadSegments.length})
          </h2>
          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-           <RecordingList recordings={uploadSegments} onLabel={onLabel} onRefresh={onRefresh} phonemeSet={phonemeSet} dictionaryId={selectedDictId} activeFilename={activeFilename} />
+           <RecordingList recordings={uploadSegments} onLabel={onLabel} onRefresh={onRefresh} phonemeSet={phonemeSet} dictionaryId={selectedDictId} activeFilename={activeFilename} aligner={selectedAligner} />
          </div>
       </div>
     </div>

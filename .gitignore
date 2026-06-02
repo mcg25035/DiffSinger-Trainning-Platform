@@ -15,3 +15,4 @@ fix_lab.py
 check_coverage.py
 update_verify.py
 dev.log
+*.pyc

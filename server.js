@@ -6,6 +6,7 @@ const fs = require('fs');
 const FormData = require('form-data');
 const mfaService = require('./services/mfa-client');
 const lyricsService = require('./services/lyrics-client');
+const mmsService = require('./services/mms-client');
 
 const app = express();
 require('dotenv').config();
@@ -46,19 +47,69 @@ const jobs = {};
 let mfaQueue = [];
 let isMfaProcessing = false;
 
+function mapRomajiToPhonemes(romajiStr, mapping) {
+    if (!mapping || !mapping.dictionary) {
+        return romajiStr;
+    }
+    const words = romajiStr.trim().split(/\s+/);
+    const phonemes = [];
+    
+    for (const word of words) {
+        if (!word) continue;
+        const ipaStr = mapping.dictionary[word] || mapping.dictionary[word.toLowerCase()];
+        if (ipaStr) {
+            const ipaSymbols = ipaStr.split(/\s+/);
+            for (const sym of ipaSymbols) {
+                const mappedSym = mapping.reverse_mapping[sym] ?? sym;
+                phonemes.push(mappedSym);
+            }
+        } else {
+            // Fallback: if not in dictionary, just push individual characters
+            for (const char of word) {
+                phonemes.push(char.toLowerCase());
+            }
+        }
+    }
+    return phonemes.join(' ');
+}
+
 async function processMfaQueue() {
     if (isMfaProcessing || mfaQueue.length === 0) return;
     
     isMfaProcessing = true;
     
-    // Wait a bit to collect more items if they are arriving in a burst (e.g. from a "process all" action)
+    // Wait a bit to collect more items if they are arriving in a burst
     await new Promise(resolve => setTimeout(resolve, 300));
     
-    // Take all current tasks as a batch
-    const batch = [...mfaQueue];
-    mfaQueue = [];
+    const firstTask = mfaQueue[0];
+    const aligner = firstTask.aligner || 'mfa';
+    const dictionaryId = firstTask.dictionaryId;
     
-    console.log(`[MFA-QUEUE] Processing batch of ${batch.length} files`);
+    // Take all current tasks with same aligner and dictionaryId as a batch
+    const batch = mfaQueue.filter(t => 
+        (t.aligner || 'mfa') === aligner && 
+        t.dictionaryId === dictionaryId
+    );
+    mfaQueue = mfaQueue.filter(t => !batch.includes(t));
+    
+    console.log(`[ALIGN-QUEUE] Processing batch of ${batch.length} files using aligner: ${aligner}`);
+    
+    let mapping = null;
+    if (dictionaryId) {
+        try {
+            const dictPath = path.join(__dirname, 'dictionaries', `${dictionaryId}.json`);
+            if (fs.existsSync(dictPath)) {
+                const dict = JSON.parse(fs.readFileSync(dictPath, 'utf-8'));
+                const modelName = dict.mfa_model || 'japanese_mfa';
+                const mappingPath = path.join(mappingsDir, `${modelName}.json`);
+                if (fs.existsSync(mappingPath)) {
+                    mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf-8'));
+                }
+            }
+        } catch (e) {
+            console.error(`[ALIGN-QUEUE] Failed to load mapping for dictionary ${dictionaryId}:`, e.message);
+        }
+    }
     
     const lyricsData = {};
     const form = new FormData();
@@ -68,7 +119,10 @@ async function processMfaQueue() {
         jobs[jobId].status = 'processing';
         
         try {
-            const lyrics = fs.readFileSync(txtPath, 'utf-8');
+            let lyrics = fs.readFileSync(txtPath, 'utf-8');
+            if (aligner === 'mms' && mapping) {
+                lyrics = mapRomajiToPhonemes(lyrics, mapping);
+            }
             lyricsData[filename] = lyrics;
             form.append('wavs', fs.createReadStream(wavPath), { filename });
         } catch (err) {
@@ -89,7 +143,13 @@ async function processMfaQueue() {
     form.append('lyrics_json', JSON.stringify(lyricsData));
 
     try {
-        const results = await mfaService.alignBatch(form);
+        let results;
+        if (aligner === 'mms') {
+            results = await mmsService.alignBatch(form);
+        } else {
+            results = await mfaService.alignBatch(form, { model: mapping?.model || 'japanese_mfa' });
+        }
+        
         for (const task of activeTasks) {
             const result = results[task.filename];
             if (result && !result.startsWith('ERROR:')) {
@@ -115,13 +175,13 @@ async function processMfaQueue() {
                 jobs[task.jobId].status = 'completed';
             } else {
                 jobs[task.jobId].status = 'error';
-                jobs[task.jobId].error = result || 'MFA failed';
+                jobs[task.jobId].error = result || 'Alignment failed';
             }
         }
     } catch (err) {
-        console.error(`[MFA-QUEUE] Batch processing failed:`, err.message);
+        console.error(`[ALIGN-QUEUE] Batch processing failed:`, err.message);
         if (err.response && err.response.data) {
-            console.error(`[MFA-QUEUE] Service Error Details:\n`, err.response.data);
+            console.error(`[ALIGN-QUEUE] Service Error Details:\n`, err.response.data);
         }
         for (const task of activeTasks) {
             jobs[task.jobId].status = 'error';
@@ -135,15 +195,15 @@ async function processMfaQueue() {
 
 // --- Health Check ---
 app.get('/api/health', async (req, res) => {
-    const [mfa, lyrics] = await Promise.all([
+    const [mfa, lyrics, mms] = await Promise.all([
         mfaService.healthCheck(),
         lyricsService.healthCheck(),
+        mmsService.healthCheck(),
     ]);
-
-    const allOk = mfa.ok && lyrics.ok;
-    res.status(allOk ? 200 : 503).json({
-        status: allOk ? 'healthy' : 'degraded',
-        services: { mfa, lyrics },
+    const allOk = mfa.ok && lyrics.ok && mms.ok;
+    res.status(allOk ? 200 : 500).json({
+        ok: allOk,
+        services: { mfa, lyrics, mms },
     });
 });
 
@@ -383,16 +443,18 @@ app.post('/api/validate_lyrics', express.json(), async (req, res) => {
 });
 
 app.post('/api/align', express.json(), async (req, res) => {
-    const { filename, dictionaryId } = req.body;
+    const { filename, dictionaryId, aligner } = req.body;
     if (!filename) return res.status(400).send('Missing filename');
     
+    const activeAligner = aligner || 'mfa';
+
     // Check if already in queue or processing
     const existingJobId = Object.keys(jobs).find(id => 
         jobs[id].filename === filename && 
         (jobs[id].status === 'pending' || jobs[id].status === 'processing')
     );
     if (existingJobId) {
-        console.log(`[MFA-QUEUE] Task for ${filename} already exists: ${existingJobId}`);
+        console.log(`[ALIGN-QUEUE] Task for ${filename} already exists: ${existingJobId}`);
         return res.json({ jobId: existingJobId });
     }
 
@@ -405,11 +467,11 @@ app.post('/api/align', express.json(), async (req, res) => {
         return res.status(400).json({ error: 'Lyrics missing' });
     }
 
-    console.log(`[MFA-QUEUE] Adding ${filename} to queue. Job: ${jobId}`);
+    console.log(`[ALIGN-QUEUE] Adding ${filename} to queue. Job: ${jobId} (Aligner: ${activeAligner})`);
     jobs[jobId] = { status: 'pending', filename };
     
     // Add to queue
-    mfaQueue.push({ jobId, filename, wavPath, txtPath, labPath });
+    mfaQueue.push({ jobId, filename, wavPath, txtPath, labPath, dictionaryId, aligner: activeAligner });
     
     // Trigger queue processing
     processMfaQueue();
@@ -418,6 +480,104 @@ app.post('/api/align', express.json(), async (req, res) => {
     setTimeout(() => delete jobs[jobId], 600000);
 
     res.json({ jobId });
+});
+
+// --- MMS-FA Fine-tuning / Training endpoints ---
+
+app.post('/api/mms/sync-train', express.json(), async (req, res) => {
+    const { epochs, lr, dictionaryId } = req.body;
+    const mmsTrainDataDir = path.join(__dirname, 'mms_service/data/training_data');
+    
+    try {
+        // Ensure directory exists and is empty
+        if (fs.existsSync(mmsTrainDataDir)) {
+            const files = fs.readdirSync(mmsTrainDataDir);
+            for (const file of files) {
+                fs.unlinkSync(path.join(mmsTrainDataDir, file));
+            }
+        } else {
+            fs.mkdirSync(mmsTrainDataDir, { recursive: true });
+        }
+        
+        // Load mapping
+        let mapping = null;
+        if (dictionaryId) {
+            const dictPath = path.join(__dirname, 'dictionaries', `${dictionaryId}.json`);
+            if (fs.existsSync(dictPath)) {
+                const dict = JSON.parse(fs.readFileSync(dictPath, 'utf-8'));
+                const modelName = dict.mfa_model || 'japanese_mfa';
+                const mappingPath = path.join(mappingsDir, `${modelName}.json`);
+                if (fs.existsSync(mappingPath)) {
+                    mapping = JSON.parse(fs.readFileSync(mappingPath, 'utf-8'));
+                }
+            }
+        }
+        
+        const files = fs.readdirSync(segmentsDir);
+        let count = 0;
+        
+        for (const file of files) {
+            if (file.endsWith('.wav')) {
+                const labFile = file.replace(/\.wav$/, '.lab');
+                const labPath = path.join(segmentsDir, labFile);
+                const wavPath = path.join(segmentsDir, file);
+                
+                if (fs.existsSync(labPath)) {
+                    const labContent = fs.readFileSync(labPath, 'utf-8');
+                    const phonemes = labContent.split('\n')
+                        .map(line => line.trim())
+                        .filter(line => line && !line.startsWith('#'))
+                        .map(line => {
+                            const parts = line.split(/\s+/);
+                            return parts[2];
+                        })
+                        .filter(phone => phone && !['pau', 'br', 'sp', 'sil', 'spn'].includes(phone));
+                        
+                    if (phonemes.length > 0) {
+                        const targetWavPath = path.join(mmsTrainDataDir, file);
+                        const targetLabPath = path.join(mmsTrainDataDir, labFile);
+                        
+                        fs.copyFileSync(wavPath, targetWavPath);
+                        fs.writeFileSync(targetLabPath, phonemes.join(' '));
+                        count++;
+                    }
+                }
+            }
+        }
+        
+        if (count === 0) {
+            return res.status(400).json({ error: 'No valid training segments (WAV + LAB pairs) found.' });
+        }
+        
+        console.log(`[MMS-TRAIN] Synced ${count} segments for training.`);
+        const result = await mmsService.train(epochs || 20, lr || 0.001);
+        res.json({
+            message: `Successfully synced ${count} segments. Fine-tuning started in the background.`,
+            status: result.status || 'started'
+        });
+        
+    } catch (err) {
+        console.error(`[MMS-TRAIN] Sync and train failed:`, err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/mms/status', async (req, res) => {
+    try {
+        const status = await mmsService.getStatus();
+        res.json(status);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/mms/health', async (req, res) => {
+    try {
+        const health = await mmsService.healthCheck();
+        res.json(health);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.post('/api/lyrics', express.json(), (req, res) => {
@@ -518,5 +678,6 @@ app.listen(PORT, async () => {
     await Promise.all([
         waitFor('MFA', mfaService.healthCheck),
         waitFor('Lyrics', lyricsService.healthCheck),
+        waitFor('MMS', mmsService.healthCheck),
     ]);
 });

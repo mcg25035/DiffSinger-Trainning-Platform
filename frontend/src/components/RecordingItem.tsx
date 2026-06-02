@@ -11,9 +11,10 @@ interface Props {
   phonemeSet?: Set<string>;
   dictionaryId?: string;
   isActive?: boolean;
+  aligner?: string;
 }
 
-export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId, isActive }: Props) => {
+export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId, isActive, aligner }: Props) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [markerProgress, setMarkerProgress] = useState(0);
@@ -192,20 +193,24 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
       }
     }
 
-    // Step 1: Pre-validation
-    try {
-        const valRes = await fetch('/api/validate_lyrics', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lyrics, model: 'japanese_mfa' }) // 暫時寫死，或根據 dictionaryId 映射
-        });
-        const valData = await valRes.json();
-        if (!valData.valid) {
-            alert(`對齊檢查失敗: ${valData.message}\n請先在 MAPPING MANAGER 中補齊或修正歌詞。`);
-            return;
+    const activeAligner = aligner || 'mfa';
+
+    // Step 1: Pre-validation (only for MFA aligner since it has a fixed phone set)
+    if (activeAligner === 'mfa') {
+        try {
+            const valRes = await fetch('/api/validate_lyrics', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lyrics, model: 'japanese_mfa' })
+            });
+            const valData = await valRes.json();
+            if (!valData.valid) {
+                alert(`對齊檢查失敗: ${valData.message}\n請先在 MAPPING MANAGER 中補齊或修正歌詞。`);
+                return;
+            }
+        } catch (err) {
+            console.warn("Validation check failed, skipping to align:", err);
         }
-    } catch (err) {
-        console.warn("Validation check failed, skipping to align:", err);
     }
     
     setIsAligning(true);
@@ -213,7 +218,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         const res = await fetch('/api/align', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: recording.filename, dictionaryId })
+            body: JSON.stringify({ filename: recording.filename, dictionaryId, aligner: activeAligner })
         });
         
         if (res.ok) {
@@ -480,9 +485,9 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
                       transition: 'all 0.2s',
                       gap: '4px'
                   }}
-                  title="MFA Forced Alignment"
+                  title={aligner === 'mms' ? "MMS-FA Forced Alignment" : "MFA Forced Alignment"}
                 >
-                  {isAligning ? <div className="spinner" /> : "MFA"}
+                  {isAligning ? <div className="spinner" /> : (aligner === 'mms' ? "MMS" : "MFA")}
                 </button>
 
                 <button

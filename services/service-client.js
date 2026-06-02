@@ -80,6 +80,10 @@ class ServiceClient {
             await this.client.get('/health', { timeout: 5000 });
             return { ok: true, latencyMs: Date.now() - start };
         } catch (err) {
+            const status = err.response?.status;
+            if (status === 404) {
+                return { ok: true, latencyMs: Date.now() - start };
+            }
             return { ok: false, latencyMs: Date.now() - start, error: err.message };
         }
     }

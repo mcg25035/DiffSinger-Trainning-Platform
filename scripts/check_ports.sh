@@ -11,6 +11,7 @@ fi
 
 MFA_PORT=${MFA_PORT:-8001}
 LYRICS_PORT=${LYRICS_PORT:-8000}
+MMS_PORT=${MMS_PORT:-8002}
 BACKEND_PORT=${BACKEND_PORT:-3010}
 
 check_port() {
@@ -38,7 +39,7 @@ check_port() {
             if [[ "$cmd" == *"docker-proxy"* ]]; then
                  # 檢查是否有我們的 container 綁定這個 port
                  local container=$(docker ps --format "{{.Names}} {{.Ports}}" 2>/dev/null | grep ":$port->" | awk '{print $1}')
-                 if [[ "$container" == *"mfa_aligner_api"* || "$container" == *"sensevoice-hira-api"* ]]; then
+                 if [[ "$container" == *"mfa_aligner_api"* || "$container" == *"sensevoice-hira-api"* || "$container" == *"mms_aligner_api"* ]]; then
                      is_ours=true
                  fi
             fi
@@ -73,6 +74,7 @@ fi
 
 check_port $MFA_PORT "MFA 對齊服務"
 check_port $LYRICS_PORT "Lyrics 辨識服務"
+check_port $MMS_PORT "MMS 對齊服務"
 check_port $BACKEND_PORT "Node.js 後端服務"
 
 echo "✅ 連接埠檢查通過，無撞車風險。"
