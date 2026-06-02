@@ -62,7 +62,14 @@ export function LabelEditor({ recording, onCancel }: Props) {
     const observer = new ResizeObserver(() => {
       const height = el.clientHeight;
       if (height > 0) {
-        setContainerHeight(height);
+        setContainerHeight((prev) => {
+          // 避免微小的版面晃動（例如播放時按鈕框線微調或捲軸出現）導致 wavesurfer 被銷毀重構。
+          // 僅在高度變化大於 10px 時（如切換全螢幕或視窗縮放）才更新高度。
+          if (prev === 0 || Math.abs(height - prev) > 10) {
+            return height;
+          }
+          return prev;
+        });
       }
     });
 

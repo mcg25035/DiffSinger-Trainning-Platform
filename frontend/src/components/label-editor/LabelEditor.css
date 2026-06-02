@@ -333,8 +333,8 @@
 }
 
 .region-track__btn--playing {
-  border-bottom: 3px solid #ffea00 !important;
-  box-shadow: 0 0 8px rgba(255, 234, 0, 0.7) !important;
+  border-bottom-color: #ffea00 !important;
+  box-shadow: 0 0 8px rgba(255, 234, 0, 0.7), inset 0 -3px 0 #ffea00 !important;
 }
 
 .region-track__select {
