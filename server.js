@@ -496,10 +496,11 @@ function getDatasetFingerprint() {
             if (file.endsWith('.wav')) {
                 const wavPath = path.join(segmentsDir, file);
                 const checkedPath = wavPath.replace(/\.wav$/, '.checked');
-                const labPath = wavPath.replace(/\.wav$/, '.lab');
-                if (fs.existsSync(checkedPath) && fs.existsSync(labPath)) {
+                const txtPath = wavPath.replace(/\.wav$/, '.txt');
+                if (fs.existsSync(checkedPath) && fs.existsSync(txtPath)) {
                     const stat = fs.statSync(wavPath);
-                    parts.push(`${file}:${stat.size}:${stat.mtimeMs}`);
+                    const txtStat = fs.statSync(txtPath);
+                    parts.push(`${file}:${stat.size}:${stat.mtimeMs}:${txtStat.mtimeMs}`);
                 }
             }
         }
@@ -577,40 +578,38 @@ async function syncAndTrain(options = {}) {
     for (const file of files) {
         if (file.endsWith('.wav')) {
             const labFile = file.replace(/\.wav$/, '.lab');
-            const labPath = path.join(segmentsDir, labFile);
+            const txtPath = path.join(segmentsDir, file.replace(/\.wav$/, '.txt'));
             const wavPath = path.join(segmentsDir, file);
             const checkedPath = wavPath.replace(/\.wav$/, '.checked');
             
-            // 只有打勾選中的片段（存在 .checked 檔案）且已有對齊資料（.lab）的片段才加入訓練
-            if (!fs.existsSync(checkedPath)) {
+            // 只有打勾選中的片段（存在 .checked 檔案）且有歌詞（.txt）的片段才加入訓練
+            if (!fs.existsSync(checkedPath) || !fs.existsSync(txtPath)) {
                 continue;
             }
             
-            if (fs.existsSync(labPath)) {
-                const labContent = fs.readFileSync(labPath, 'utf-8');
-                const phonemes = labContent.split('\n')
-                    .map(line => line.trim())
-                    .filter(line => line && !line.startsWith('#'))
-                    .map(line => {
-                        const parts = line.split(/\s+/);
-                        return parts[2];
-                    })
-                    .filter(phone => phone && !['pau', 'br', 'sp', 'sil', 'spn'].includes(phone));
-                    
-                if (phonemes.length > 0) {
-                    const targetWavPath = path.join(mmsTrainDataDir, file);
-                    const targetLabPath = path.join(mmsTrainDataDir, labFile);
-                    
-                    fs.copyFileSync(wavPath, targetWavPath);
-                    fs.writeFileSync(targetLabPath, phonemes.join(' '));
-                    count++;
-                }
+            let lyrics = fs.readFileSync(txtPath, 'utf-8').trim();
+            if (!lyrics) continue;
+            
+            // 用 mapping 把 romaji/word 轉成 phoneme 序列（跟對齊時同樣的邏輯）
+            if (mapping) {
+                lyrics = mapRomajiToPhonemes(lyrics, mapping);
+            }
+            
+            const phonemes = lyrics.split(/\s+/).filter(p => p && !['pau', 'br', 'sp', 'sil', 'spn'].includes(p));
+            
+            if (phonemes.length > 0) {
+                const targetWavPath = path.join(mmsTrainDataDir, file);
+                const targetLabPath = path.join(mmsTrainDataDir, labFile);
+                
+                fs.copyFileSync(wavPath, targetWavPath);
+                fs.writeFileSync(targetLabPath, phonemes.join(' '));
+                count++;
             }
         }
     }
     
     if (count === 0) {
-        throw new Error('No valid training segments (WAV + LAB pairs) checked.');
+        throw new Error('No valid training segments (WAV + TXT pairs) checked.');
     }
     
     console.log(`[MMS-TRAIN] Synced ${count} segments for training.`);
