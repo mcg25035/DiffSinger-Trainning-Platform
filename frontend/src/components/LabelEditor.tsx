@@ -27,7 +27,7 @@ import { useLabelPersistence } from '../hooks/useLabelPersistence';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { getRegionLabel } from '../utils/regionStyle';
 import { loadWordAlignmentMap } from '../utils/alignmentStorage';
-import { focusAndMoveCursorToEnd, focusAndSelectAll } from '../utils/domUtils';
+import { focusAndSelectAll } from '../utils/domUtils';
 import { LabelToolbar } from './label-editor/LabelToolbar';
 import { PhonemeEditPanel } from './label-editor/PhonemeEditPanel';
 import { RegionButtonTrack } from './label-editor/RegionButtonTrack';
