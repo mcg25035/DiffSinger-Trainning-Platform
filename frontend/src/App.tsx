@@ -270,6 +270,7 @@ function App() {
           <div style={{ display: selectedForLabeling ? 'block' : 'none', width: '100%', height: '100%' }}>
             {selectedForLabeling && (
               <LabelEditor 
+                key={selectedForLabeling.filename}
                 recording={selectedForLabeling} 
                 onCancel={handleCancelLabeling} 
               />
