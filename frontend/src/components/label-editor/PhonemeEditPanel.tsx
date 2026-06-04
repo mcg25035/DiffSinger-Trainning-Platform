@@ -70,7 +70,7 @@ export function PhonemeEditPanel({
         }}
         onFocus={(e) => focusAndSelectAll(e.target, 0)}
       />
-      <button onClick={onUpdate} className="phoneme-edit__btn phoneme-edit__btn--ok">OK</button>
+      <button onClick={() => onUpdate()} className="phoneme-edit__btn phoneme-edit__btn--ok">OK</button>
       <button onClick={onPlay} className="phoneme-edit__btn phoneme-edit__btn--play">PLAY</button>
       <button onClick={onDelete} className="phoneme-edit__btn phoneme-edit__btn--del">DEL</button>
       <div className="phoneme-edit__divider" />
