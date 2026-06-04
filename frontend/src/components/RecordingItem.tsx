@@ -12,9 +12,10 @@ interface Props {
   dictionaryId?: string;
   isActive?: boolean;
   aligner?: string;
+  onAIContextMenu?: (recording: Recording) => void;
 }
 
-export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId, isActive, aligner }: Props) => {
+export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId, isActive, aligner, onAIContextMenu }: Props) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [markerProgress, setMarkerProgress] = useState(0);
@@ -523,6 +524,12 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
               <>
                 <button
                   onClick={handleTranscribeClick}
+                  onContextMenu={(e) => {
+                    if (onAIContextMenu) {
+                      e.preventDefault();
+                      onAIContextMenu(recording);
+                    }
+                  }}
                   disabled={isTranscribing}
                   style={{ 
                       background: '#222', 
@@ -538,7 +545,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
                       fontSize: '10px',
                       transition: 'all 0.2s'
                   }}
-                  title="AI Transcribe Lyrics"
+                  title="AI Transcribe Lyrics (Right click for Batch)"
                 >
                   {isTranscribing ? "..." : "AI"}
                 </button>

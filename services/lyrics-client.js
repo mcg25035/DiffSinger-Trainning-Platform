@@ -18,6 +18,9 @@ const lyricsClient = new ServiceClient('Lyrics', `http://localhost:${LYRICS_PORT
  * @returns {Promise<{ romaji: string }>}
  */
 async function transcribe(wavPath) {
+    if (!fs.existsSync(wavPath)) {
+        throw new Error(`File not found: ${wavPath}`);
+    }
     const form = new FormData();
     form.append('file', fs.createReadStream(wavPath));
 
@@ -31,6 +34,9 @@ async function transcribe(wavPath) {
 }
 
 async function transcribeWithLyrics(wavPath, fullLyrics) {
+    if (!fs.existsSync(wavPath)) {
+        throw new Error(`File not found: ${wavPath}`);
+    }
     const form = new FormData();
     form.append('file', fs.createReadStream(wavPath));
     form.append('full_lyrics', fullLyrics);
