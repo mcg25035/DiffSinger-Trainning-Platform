@@ -26,6 +26,8 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
   const [isHovered, setIsHovered] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isChecked, setIsChecked] = useState(recording.isChecked || false);
+  const [showLyricsDialog, setShowLyricsDialog] = useState(false);
+  const [fullLyricsInput, setFullLyricsInput] = useState('');
   const pollIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -166,8 +168,13 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
     }
   };
 
-  const handleTranscribe = async (e: React.MouseEvent) => {
+  const handleTranscribeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setShowLyricsDialog(true);
+  };
+
+  const handleTranscribeOriginal = async () => {
+    setShowLyricsDialog(false);
     setIsTranscribing(true);
     try {
         const res = await fetch('/api/transcribe', {
@@ -177,6 +184,38 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         });
         if (res.ok) {
             if (onRefresh) onRefresh();
+        } else {
+            alert("辨識失敗");
+        }
+    } catch (err) {
+        console.error(err);
+        alert("辨識錯誤");
+    } finally {
+        setIsTranscribing(false);
+    }
+  };
+
+  const handleTranscribeWithLyrics = async () => {
+    if (!fullLyricsInput.trim()) {
+        alert("請輸入羅馬拼音歌詞！");
+        return;
+    }
+    setShowLyricsDialog(false);
+    setIsTranscribing(true);
+    try {
+        const res = await fetch('/api/transcribe_with_lyrics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: recording.filename, fullLyrics: fullLyricsInput })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            if (data.success) {
+                alert(`辨識成功！匹配分數: ${(data.match_score * 100).toFixed(1)}%\n\n粗略辨識: ${data.rough_romaji}\n\n匹配結果: ${data.lyrics}`);
+                if (onRefresh) onRefresh();
+            } else {
+                alert("辨識失敗：" + (data.error || "未知錯誤"));
+            }
         } else {
             alert("辨識失敗");
         }
@@ -483,7 +522,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
             {recording.type === 'segment' && (
               <>
                 <button
-                  onClick={handleTranscribe}
+                  onClick={handleTranscribeClick}
                   disabled={isTranscribing}
                   style={{ 
                       background: '#222', 
@@ -649,6 +688,117 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
               isPending={recording.isPending}
             />
           )}
+        </div>
+      )}
+
+      {showLyricsDialog && (
+        <div 
+          onClick={() => setShowLyricsDialog(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            backdropFilter: 'blur(4px)'
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '520px',
+              background: '#111',
+              border: '1px solid #333',
+              borderRadius: '20px',
+              padding: '24px',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '900', color: '#ffa726' }}>AI 歌詞自動匹配</h3>
+              <p style={{ margin: '6px 0 0 0', fontSize: '12px', color: '#888' }}>
+                輸入整首歌的羅馬拼音歌詞，AI 將自動對齊並擷取該片段的最佳匹配字詞，以提高對齊準確率。
+              </p>
+            </div>
+
+            <textarea
+              value={fullLyricsInput}
+              onChange={(e) => setFullLyricsInput(e.target.value)}
+              placeholder="貼上整首歌的羅馬拼音歌詞 (例如: ta bu n jo u zu ni na te ta bu n ge de i i ne...)"
+              style={{
+                width: '100%',
+                height: '180px',
+                background: '#000',
+                border: '1px solid #333',
+                borderRadius: '10px',
+                color: '#fff',
+                padding: '12px',
+                fontSize: '13px',
+                lineHeight: '1.6',
+                outline: 'none',
+                resize: 'none',
+                boxSizing: 'border-box'
+              }}
+            />
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                onClick={() => setShowLyricsDialog(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#888',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleTranscribeOriginal}
+                style={{
+                  background: '#222',
+                  border: '1px solid #444',
+                  color: '#fff',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+                title="不提供整首歌歌詞，直接呼叫語音辨識並轉平假名/羅馬字"
+              >
+                跳過 (原始辨識)
+              </button>
+              <button 
+                onClick={handleTranscribeWithLyrics}
+                style={{
+                  background: '#ffa726',
+                  border: 'none',
+                  color: '#000',
+                  padding: '8px 20px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: '900',
+                  cursor: 'pointer'
+                }}
+              >
+                送出匹配
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

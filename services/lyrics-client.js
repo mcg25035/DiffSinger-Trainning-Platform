@@ -30,6 +30,20 @@ async function transcribe(wavPath) {
     return response.data;
 }
 
+async function transcribeWithLyrics(wavPath, fullLyrics) {
+    const form = new FormData();
+    form.append('file', fs.createReadStream(wavPath));
+    form.append('full_lyrics', fullLyrics);
+
+    const response = await lyricsClient.request({
+        method: 'POST',
+        url: '/transcribe_with_lyrics',
+        data: form,
+        headers: form.getHeaders(),
+    });
+    return response.data;
+}
+
 /**
  * Health check
  * @returns {Promise<{ ok: boolean, latencyMs: number, error?: string }>}
@@ -38,4 +52,4 @@ async function healthCheck() {
     return lyricsClient.healthCheck();
 }
 
-module.exports = { transcribe, healthCheck };
+module.exports = { transcribe, transcribeWithLyrics, healthCheck };
