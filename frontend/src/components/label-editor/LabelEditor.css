@@ -434,6 +434,60 @@
   color: #fff !important;
 }
 
+/* ── Fullscreen Navigation Buttons ── */
+
+.label-toolbar__nav-group {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.label-toolbar__btn--nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: #aaa !important;
+  padding: 8px 14px !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.3px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.label-toolbar__btn--nav:hover:not(:disabled) {
+  background: rgba(0, 229, 255, 0.1) !important;
+  border-color: rgba(0, 229, 255, 0.3) !important;
+  color: #00e5ff !important;
+}
+
+.label-toolbar__btn--nav:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.label-toolbar__btn--nav:disabled {
+  opacity: 0.25 !important;
+  cursor: not-allowed !important;
+}
+
+.label-toolbar__btn--nav svg {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.label-toolbar__btn--prev:hover:not(:disabled) svg {
+  transform: translateX(-2px);
+}
+
+.label-toolbar__btn--next:hover:not(:disabled) svg {
+  transform: translateX(2px);
+}
+
 /* ── Lyrics Overlay in Fullscreen ── */
 .label-editor__lyrics-overlay {
   position: absolute;

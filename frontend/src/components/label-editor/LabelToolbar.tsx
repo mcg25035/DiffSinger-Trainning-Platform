@@ -29,6 +29,9 @@ interface Props {
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
   filename?: string;
+  // Navigation
+  onNext?: () => void;
+  onPrevious?: () => void;
 }
 
 export function LabelToolbar({
@@ -52,6 +55,8 @@ export function LabelToolbar({
   isFullscreen = false,
   onToggleFullscreen,
   filename,
+  onNext,
+  onPrevious,
 }: Props) {
   const disabled = !isLoaded || !isAudioLoaded || isMultipleSelect;
 
@@ -118,6 +123,32 @@ export function LabelToolbar({
       </div>
 
       <div className="label-toolbar__right">
+        {isFullscreen && (onPrevious || onNext) && (
+          <div className="label-toolbar__nav-group">
+            <button
+              onClick={onPrevious}
+              disabled={!onPrevious}
+              className="label-toolbar__btn label-toolbar__btn--nav label-toolbar__btn--prev"
+              title="Previous recording"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+              Prev
+            </button>
+            <button
+              onClick={onNext}
+              disabled={!onNext}
+              className="label-toolbar__btn label-toolbar__btn--nav label-toolbar__btn--next"
+              title="Next recording"
+            >
+              Next
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          </div>
+        )}
         {onToggleFullscreen && (
           <button onClick={onToggleFullscreen} className={`label-toolbar__btn ${isFullscreen ? 'label-toolbar__btn--exit' : 'label-toolbar__btn--fullscreen'}`}>
             {isFullscreen ? 'Exit Full Screen' : 'Full Screen'}

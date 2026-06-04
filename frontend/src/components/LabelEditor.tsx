@@ -38,9 +38,11 @@ import type { Region } from 'wavesurfer.js/plugins/regions';
 interface Props {
   recording: Recording;
   onCancel: () => void;
+  onNext?: () => void;
+  onPrevious?: () => void;
 }
 
-export function LabelEditor({ recording, onCancel }: Props) {
+export function LabelEditor({ recording, onCancel, onNext, onPrevious }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const waveformContainerRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -524,6 +526,8 @@ export function LabelEditor({ recording, onCancel }: Props) {
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
         filename={recording.filename}
+        onNext={onNext}
+        onPrevious={onPrevious}
       />
 
       <div className="label-editor__main">

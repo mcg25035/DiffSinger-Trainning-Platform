@@ -228,6 +228,35 @@ function App() {
     refreshRecordings(); // Refresh when closing to ensure updated state
   }, [refreshRecordings]);
 
+  // ── Next / Previous navigation for LabelEditor fullscreen ──
+  const allLabelableRecordings = [...rawRecordings, ...uploadSegments];
+  const currentLabelIndex = selectedForLabeling
+    ? allLabelableRecordings.findIndex((r) => r.filename === selectedForLabeling.filename)
+    : -1;
+
+  const handleNextRecording = useCallback(() => {
+    const all = [...rawRecordings, ...uploadSegments];
+    const idx = selectedForLabeling
+      ? all.findIndex((r) => r.filename === selectedForLabeling.filename)
+      : -1;
+    if (idx !== -1 && idx < all.length - 1) {
+      setSelectedForLabeling(all[idx + 1]);
+    }
+  }, [rawRecordings, uploadSegments, selectedForLabeling]);
+
+  const handlePrevRecording = useCallback(() => {
+    const all = [...rawRecordings, ...uploadSegments];
+    const idx = selectedForLabeling
+      ? all.findIndex((r) => r.filename === selectedForLabeling.filename)
+      : -1;
+    if (idx > 0) {
+      setSelectedForLabeling(all[idx - 1]);
+    }
+  }, [rawRecordings, uploadSegments, selectedForLabeling]);
+
+  const hasNext = currentLabelIndex !== -1 && currentLabelIndex < allLabelableRecordings.length - 1;
+  const hasPrev = currentLabelIndex > 0;
+
   return (
     <div style={{ 
       width: '100vw', 
@@ -272,7 +301,9 @@ function App() {
               <LabelEditor 
                 key={selectedForLabeling.filename}
                 recording={selectedForLabeling} 
-                onCancel={handleCancelLabeling} 
+                onCancel={handleCancelLabeling}
+                onNext={hasNext ? handleNextRecording : undefined}
+                onPrevious={hasPrev ? handlePrevRecording : undefined}
               />
             )}
           </div>
