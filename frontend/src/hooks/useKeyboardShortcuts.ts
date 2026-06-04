@@ -17,6 +17,7 @@ export interface KeyboardHandlers {
   onFocusInput?: () => void;
   onArrowLeft?: () => void;
   onArrowRight?: () => void;
+  onQuickReplace?: (replacement: string) => void;
 }
 
 export function useKeyboardShortcuts(handlers: KeyboardHandlers): void {
@@ -76,6 +77,9 @@ export function useKeyboardShortcuts(handlers: KeyboardHandlers): void {
         e.preventDefault();
         e.stopPropagation();
         handlersRef.current.onArrowRight?.();
+      } else if (e.key === '1' || e.key === '2') {
+        const replacement = e.key === '1' ? 'br' : 'pau';
+        handlersRef.current.onQuickReplace?.(replacement);
       }
     };
 

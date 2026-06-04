@@ -491,6 +491,12 @@ export function LabelEditor({ recording, onCancel }: Props) {
     },
     onArrowLeft: handleSelectPrevPhoneme,
     onArrowRight: handleSelectNextPhoneme,
+    onQuickReplace: (replacement) => {
+      if (regionMgr.selectedRegion && regionMgr.editLabel === '!') {
+        regionMgr.setEditLabel(replacement);
+        regionMgr.updateLabel(replacement);
+      }
+    },
   });
 
   // ── 渲染 ──
