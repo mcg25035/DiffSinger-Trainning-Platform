@@ -166,6 +166,13 @@ export function LabelEditor({ recording, onCancel }: Props) {
     onDblClick: (time) => {
       regionMgr.splitAtTime(time);
     },
+    onRightClick: (time) => {
+      // 右鍵點擊：將黃色 start pointer 移到點擊位置
+      const regions = wavesurfer.regionsRef.current;
+      if (!regions) return;
+      regionMgr.setStartPointerTime(time);
+      regionMgr.recreateStartPointer(regions, time);
+    },
   });
 
   const [activePlayRange, setActivePlayRange] = useState<{ start: number; end: number } | null>(null);
@@ -199,6 +206,8 @@ export function LabelEditor({ recording, onCancel }: Props) {
     regionMgr.refreshRegionsState();
     persistence.setIsDirty(true);
     persistence.setSaveStatus('idle');
+    // autosave: 每次改動後 debounce 800ms 自動存檔
+    persistence.triggerAutoSave(() => regionMgr.getCurrentSegments());
   });
 
   // 讓 savedSelectionTimeRef 永遠與 regionMgr.selectedRegion 同步

@@ -25,6 +25,7 @@ export interface UseWaveSurferOptions {
   onRegionUpdated?: (region: Region) => void;
   onRegionClicked?: (region: Region, e: MouseEvent) => void;
   onDblClick?: (time: number) => void;
+  onRightClick?: (time: number) => void;
 }
 
 export interface UseWaveSurferReturn {
@@ -46,6 +47,7 @@ export function useWaveSurfer({
   onRegionUpdated,
   onRegionClicked,
   onDblClick,
+  onRightClick,
 }: UseWaveSurferOptions): UseWaveSurferReturn {
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
@@ -59,12 +61,14 @@ export function useWaveSurfer({
   const onRegionUpdatedRef = useRef(onRegionUpdated);
   const onRegionClickedRef = useRef(onRegionClicked);
   const onDblClickRef = useRef(onDblClick);
+  const onRightClickRef = useRef(onRightClick);
   useEffect(() => {
     onReadyRef.current = onReady;
     onRegionUpdateRef.current = onRegionUpdate;
     onRegionUpdatedRef.current = onRegionUpdated;
     onRegionClickedRef.current = onRegionClicked;
     onDblClickRef.current = onDblClick;
+    onRightClickRef.current = onRightClick;
   });
 
   // 初始化 WaveSurfer
@@ -128,8 +132,21 @@ export function useWaveSurfer({
       onDblClickRef.current?.(time);
     });
 
-    // 攔截右鍵選單
-    const handleContextMenu = (e: MouseEvent) => e.preventDefault();
+    // 攔截右鍵選單 + 移動 start pointer
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      // 計算右鍵點擊對應的時間位置
+      const wrapper = ws.getWrapper();
+      if (!wrapper) return;
+      const rect = wrapper.getBoundingClientRect();
+      const scrollLeft = wrapper.scrollLeft;
+      const xInWrapper = e.clientX - rect.left + scrollLeft;
+      const scrollWidth = wrapper.scrollWidth;
+      const duration = ws.getDuration();
+      if (duration <= 0 || scrollWidth <= 0) return;
+      const time = Math.max(0, Math.min(duration, (xInWrapper / scrollWidth) * duration));
+      onRightClickRef.current?.(time);
+    };
     containerRef.current?.addEventListener('contextmenu', handleContextMenu);
 
     // Ctrl+滾輪 zoom
