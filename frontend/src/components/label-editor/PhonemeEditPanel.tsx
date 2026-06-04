@@ -10,7 +10,7 @@ interface Props {
   isMultipleSelect?: boolean;
   editLabel: string;
   onEditLabelChange: (label: string) => void;
-  onUpdate: () => void;
+  onUpdate: (labelOverride?: string) => void;
   onPlay: () => void;
   onDelete: () => void;
   onDeselect: () => void;
@@ -65,8 +65,7 @@ export function PhonemeEditPanel({
             e.preventDefault();
             const replacement = e.key === '1' ? 'br' : 'pau';
             onEditLabelChange(replacement);
-            // Defer onUpdate so React state flushes the new label first
-            setTimeout(() => onUpdate(), 0);
+            onUpdate(replacement);
           }
         }}
         onFocus={(e) => focusAndSelectAll(e.target, 0)}

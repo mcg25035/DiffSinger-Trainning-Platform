@@ -45,7 +45,7 @@ export interface UseRegionManagerReturn {
   setEditLabel: (label: string) => void;
   loadRegions: (segments: LabSegment[], regions: RegionsPlugin) => void;
   renderSegments: (segments: LabSegment[], regions: RegionsPlugin) => void;
-  updateLabel: () => void;
+  updateLabel: (labelOverride?: string) => void;
   deleteSelected: () => void;
   splitAtTime: (time: number) => void;
   handleRegionUpdate: (region: Region) => void;
@@ -201,9 +201,10 @@ export function useRegionManager(
   );
 
   // 更新選中 region 的標籤
-  const updateLabel = useCallback(() => {
+  const updateLabel = useCallback((labelOverride?: string) => {
     if (selectedRegionIds.size > 1) return;
     if (!selectedRegion || !regionsRef.current) return;
+    const label = labelOverride !== undefined ? labelOverride : editLabel;
     const all = regionsRef.current
       .getRegions()
       .filter((r) => r.id !== 'start-pointer')
@@ -214,9 +215,9 @@ export function useRegionManager(
     const wordIndex = getRegionWordIndex(selectedRegion);
 
     selectedRegion.setOptions({
-      content: createLabelElement(editLabel, level),
+      content: createLabelElement(label, level),
     });
-    applyRegionStyle(selectedRegion, editLabel, level, score, wordIndex);
+    applyRegionStyle(selectedRegion, label, level, score, wordIndex);
 
     commitChange();
   }, [selectedRegion, selectedRegionIds, editLabel, regionsRef, commitChange]);
