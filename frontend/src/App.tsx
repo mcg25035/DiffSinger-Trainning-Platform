@@ -203,6 +203,7 @@ function App() {
 
   const [selectedForSplit, setSelectedForSplit] = useState<Recording | null>(null);
   const [selectedForLabeling, setSelectedForLabeling] = useState<Recording | null>(null);
+  const [isLabelFullscreen, setIsLabelFullscreen] = useState(false);
 
   const handleAdopt = useCallback(() => {
     setSelectedForSplit(null);
@@ -225,6 +226,7 @@ function App() {
 
   const handleCancelLabeling = useCallback(() => {
     setSelectedForLabeling(null);
+    setIsLabelFullscreen(false);
     refreshRecordings(); // Refresh when closing to ensure updated state
   }, [refreshRecordings]);
 
@@ -304,6 +306,8 @@ function App() {
                 onCancel={handleCancelLabeling}
                 onNext={hasNext ? handleNextRecording : undefined}
                 onPrevious={hasPrev ? handlePrevRecording : undefined}
+                isFullscreen={isLabelFullscreen}
+                onFullscreenChange={setIsLabelFullscreen}
               />
             )}
           </div>

@@ -40,14 +40,18 @@ interface Props {
   onCancel: () => void;
   onNext?: () => void;
   onPrevious?: () => void;
+  isFullscreen?: boolean;
+  onFullscreenChange?: (fs: boolean) => void;
 }
 
-export function LabelEditor({ recording, onCancel, onNext, onPrevious }: Props) {
+export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscreen: isFullscreenProp = false, onFullscreenChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const waveformContainerRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreenLocal, setIsFullscreenLocal] = useState(false);
+  const isFullscreen = onFullscreenChange ? isFullscreenProp : isFullscreenLocal;
+  const setIsFullscreen = onFullscreenChange ?? setIsFullscreenLocal;
   const [containerHeight, setContainerHeight] = useState<number>(0);
   
   const savedTimeRef = useRef<number>(0);
@@ -417,8 +421,8 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious }: Props) 
       ? (regionMgr.selectedRegion.start + regionMgr.selectedRegion.end) / 2
       : null;
 
-    setIsFullscreen((prev) => !prev);
-  }, [wavesurfer.wavesurferRef, regionMgr.selectedRegion, audio.isPlayingRef]);
+    setIsFullscreen(!isFullscreen);
+  }, [wavesurfer.wavesurferRef, regionMgr.selectedRegion, audio.isPlayingRef, isFullscreen, setIsFullscreen]);
 
   const handleSelectPrevPhoneme = useCallback(() => {
     const ws = wavesurfer.wavesurferRef.current;
