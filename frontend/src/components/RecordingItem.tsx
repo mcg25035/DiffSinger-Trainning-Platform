@@ -255,6 +255,27 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
     }
   };
 
+  const togglePlayRef = useRef(togglePlay);
+  useEffect(() => {
+    togglePlayRef.current = togglePlay;
+  }, [togglePlay]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.key === ' ' || e.code === 'Space') {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON') return;
+        
+        e.preventDefault();
+        togglePlayRef.current({ stopPropagation: () => {} } as any);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isActive]);
+
   const handleTranscribeClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowLyricsDialog(true);
@@ -422,6 +443,7 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
   return (
     <div 
       className={`recording-item ${isActive ? 'is-active' : ''}`}
+      tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === ' ' || e.code === 'Space') {
           if ((e.target as HTMLElement).tagName === 'INPUT') return;
