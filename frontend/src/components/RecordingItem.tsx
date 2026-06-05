@@ -115,7 +115,6 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
 
   console.log("[RecordingItem] render. filename:", recording.filename, "lyricsState:", lyrics, "isEditingState:", isEditing, "isActiveProp:", isActive);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [isHovered, setIsHovered] = useState(false);
   const [isChecked, setIsChecked] = useState(recording.isChecked || false);
   const [showLyricsDialog, setShowLyricsDialog] = useState(false);
   const [fullLyricsInput, setFullLyricsInput] = useState('');
