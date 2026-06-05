@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect, memo, useCallback } from 'react';
 import type { Recording } from '../hooks/useAudioMonitor';
 import { validateLyrics } from '../utils/dictionary';
 import { LyricsMarkerList } from './LyricsMarkerList';
+import { focusAndMoveCursorToEnd } from '../utils/domUtils';
 
 interface Props {
   recording: Recording;
@@ -15,6 +16,94 @@ interface Props {
   onAIContextMenu?: (recording: Recording) => void;
 }
 
+interface LyricsInputProps {
+  initialValue: string;
+  onSave: (value: string) => void;
+  onCancel: () => void;
+  isPending?: boolean;
+}
+
+const LyricsInput = memo(({ initialValue, onSave, onCancel, isPending }: LyricsInputProps) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const scrollPosRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      focusAndMoveCursorToEnd(inputRef.current, 50);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.value = initialValue;
+    }
+  }, [initialValue]);
+
+  return (
+    <div style={{ display: 'flex', gap: '8px', flex: 1 }}>
+      <input
+        ref={inputRef}
+        defaultValue={initialValue}
+        onScroll={(e) => {
+          if (document.activeElement === e.currentTarget) {
+            scrollPosRef.current = e.currentTarget.scrollLeft;
+          }
+        }}
+        onFocus={(e) => {
+          e.stopPropagation();
+        }}
+        onBlur={(e) => {
+          e.stopPropagation();
+          const target = e.currentTarget;
+          const pos = scrollPosRef.current;
+          requestAnimationFrame(() => {
+            target.scrollLeft = pos;
+          });
+          setTimeout(() => {
+            target.scrollLeft = pos;
+          }, 0);
+        }}
+        placeholder="輸入羅馬歌詞 (空格分隔)..."
+        style={{
+          flex: 1,
+          background: '#000',
+          border: `1px solid ${isPending ? '#ffca28' : '#333'}`,
+          borderRadius: '6px',
+          color: '#fff',
+          padding: '4px 8px',
+          fontSize: '11px',
+          outline: 'none',
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            onSave(inputRef.current?.value || '');
+          }
+          if (e.key === 'Escape') {
+            onCancel();
+          }
+        }}
+      />
+      <button
+        onClick={() => {
+          onSave(inputRef.current?.value || '');
+        }}
+        style={{
+          background: '#fff',
+          border: 'none',
+          borderRadius: '6px',
+          color: '#000',
+          padding: '4px 12px',
+          fontSize: '11px',
+          fontWeight: 'bold',
+          cursor: 'pointer',
+        }}
+      >
+        SAVE
+      </button>
+    </div>
+  );
+});
+
 export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, phonemeSet, dictionaryId, isActive, aligner, onAIContextMenu }: Props) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -23,9 +112,10 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isAligning, setIsAligning] = useState(false);
   const [lyrics, setLyrics] = useState(recording.lyrics || '');
+
+  console.log("[RecordingItem] render. filename:", recording.filename, "lyricsState:", lyrics, "isEditingState:", isEditing, "isActiveProp:", isActive);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isHovered, setIsHovered] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
   const [isChecked, setIsChecked] = useState(recording.isChecked || false);
   const [showLyricsDialog, setShowLyricsDialog] = useState(false);
   const [fullLyricsInput, setFullLyricsInput] = useState('');
@@ -72,15 +162,12 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
   
   // Sync state when prop updates (critical for AI transcription results)
   useEffect(() => {
-    setLyrics(recording.lyrics || '');
-  }, [recording.lyrics]);
-
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus();
+    console.log("[RecordingItem] Sync useEffect. filename:", recording.filename, "recording.lyrics:", recording.lyrics, "isEditing:", isEditing);
+    if (!isEditing) {
+      setLyrics(recording.lyrics || '');
     }
-  }, [isEditing]);
+  }, [recording.lyrics, isEditing]);
+
 
   const audioObjRef = useRef<HTMLAudioElement | null>(null);
   const progressTimerRef = useRef<number | null>(null);
@@ -300,9 +387,10 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
     }
   };
 
-  const handleSaveLyrics = async () => {
+  const handleSaveLyrics = useCallback(async (valueOverride?: string) => {
+    const targetLyrics = valueOverride !== undefined ? valueOverride : lyrics;
     if (phonemeSet && phonemeSet.size > 0) {
-        const { isValid, invalidWords } = validateLyrics(lyrics, phonemeSet);
+        const { isValid, invalidWords } = validateLyrics(targetLyrics, phonemeSet);
         if (!isValid) {
             alert(`無效的羅馬歌詞: ${invalidWords.join(', ')}`);
             return;
@@ -313,10 +401,11 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         const response = await fetch('/api/lyrics', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: recording.filename, lyrics })
+            body: JSON.stringify({ filename: recording.filename, lyrics: targetLyrics })
         });
         if (response.ok) {
             setIsEditing(false);
+            setLyrics(targetLyrics);
             if (onRefresh) onRefresh();
         } else {
             alert("儲存失敗");
@@ -325,11 +414,15 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
         console.error("Save Lyrics Error:", err);
         alert("儲存失敗");
     }
-  };
+  }, [recording.filename, phonemeSet, onRefresh, lyrics]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+  }, []);
 
   return (
     <div 
-      tabIndex={0}
+      className={`recording-item ${isActive ? 'is-active' : ''}`}
       onKeyDown={(e) => {
         if (e.key === ' ' || e.code === 'Space') {
           if ((e.target as HTMLElement).tagName === 'INPUT') return;
@@ -337,27 +430,6 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
           togglePlay(e as any);
         }
       }}
-      style={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        background: isActive 
-          ? (isHovered ? '#2c2c2c' : '#222') 
-          : (isHovered ? '#222' : '#1a1a1a'), 
-        padding: isActive ? '11px 15px' : '12px 16px', 
-        borderRadius: '14px', 
-        border: isActive 
-          ? '2px solid #00e5ff' 
-          : (isFocused ? '1px solid #777' : (isHovered ? '1px solid #555' : '1px solid #333')),
-        boxShadow: isActive ? '0 0 12px rgba(0, 229, 255, 0.35)' : 'none',
-        transition: 'all 0.2s',
-        marginBottom: '10px',
-        cursor: 'default',
-        outline: 'none'
-      }}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
@@ -662,32 +734,12 @@ export const RecordingItem = memo(({ recording, onSplit, onLabel, onRefresh, pho
       {(isEditing || recording.lyrics) && (
         <div style={{ marginTop: isEditing ? '12px' : '4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {isEditing ? (
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input 
-                ref={inputRef}
-                value={lyrics}
-                onChange={e => setLyrics(e.target.value)}
-                placeholder="輸入羅馬歌詞 (空格分隔)..."
-                autoFocus
-                style={{ 
-                  flex: 1, 
-                  background: '#000', 
-                  border: `1px solid ${recording.isPending ? '#ffca28' : '#333'}`, 
-                  borderRadius: '6px', 
-                  color: '#fff', 
-                  padding: '4px 8px', 
-                  fontSize: '11px',
-                  outline: 'none'
-                }}
-                onKeyDown={e => { if (e.key === 'Enter') handleSaveLyrics(); if (e.key === 'Escape') setIsEditing(false); }}
-              />
-              <button 
-                onClick={handleSaveLyrics}
-                style={{ background: '#fff', border: 'none', borderRadius: '6px', color: '#000', padding: '4px 12px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' }}
-              >
-                SAVE
-              </button>
-            </div>
+            <LyricsInput
+              initialValue={lyrics}
+              onSave={handleSaveLyrics}
+              onCancel={handleCancelEdit}
+              isPending={recording.isPending}
+            />
           ) : (
             <LyricsMarkerList
               lyrics={recording.lyrics || ''}
