@@ -28,9 +28,26 @@ DEFAULT_PYTORCH_INDEX="https://download.pytorch.org/whl/cu110"
 DEFAULT_TORCH="1.7.1+cu110"
 DEFAULT_TORCHAUDIO="0.7.2"
 
+# MMS 預設使用 PyTorch 2.1.2 和 CUDA 11.8
+DEFAULT_MMS_BASE_IMAGE="pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime"
+DEFAULT_MMS_PYTORCH_INDEX="https://download.pytorch.org/whl/cu118"
+DEFAULT_MMS_TORCHAUDIO="2.1.2"
+
+DETECTED_MMS_BASE_IMAGE=""
+DETECTED_MMS_PYTORCH_INDEX=""
+DETECTED_MMS_TORCHAUDIO=""
+
 # --- 偵測驅動版本 (L2.2) ---
-if command -v nvidia-smi &> /dev/null; then
-    DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | cut -d'.' -f1)
+NVIDIA_SMI_BIN=""
+for path in "nvidia-smi" "/usr/bin/nvidia-smi" "/usr/sbin/nvidia-smi" "/usr/local/cuda/bin/nvidia-smi" "/usr/local/nvidia/bin/nvidia-smi"; do
+    if command -v "$path" &>/dev/null || [ -f "$path" ]; then
+        NVIDIA_SMI_BIN="$path"
+        break
+    fi
+done
+
+if [ -n "$NVIDIA_SMI_BIN" ]; then
+    DRIVER_VER=$($NVIDIA_SMI_BIN --query-gpu=driver_version --format=csv,noheader | cut -d'.' -f1)
     echo "🔍 偵測到 NVIDIA 驅動版本: $DRIVER_VER"
 
     if [ "$DRIVER_VER" -ge 525 ]; then
@@ -39,12 +56,20 @@ if command -v nvidia-smi &> /dev/null; then
         DETECTED_PYTORCH_INDEX="https://download.pytorch.org/whl/cu121"
         DETECTED_TORCH="2.1.2"
         DETECTED_TORCHAUDIO="2.1.2"
+
+        DETECTED_MMS_BASE_IMAGE="pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime"
+        DETECTED_MMS_PYTORCH_INDEX="https://download.pytorch.org/whl/cu121"
+        DETECTED_MMS_TORCHAUDIO="2.1.2"
     elif [ "$DRIVER_VER" -ge 450 ]; then
         DETECTED_CUDA="11.0.3"
         DETECTED_TAG="${DETECTED_CUDA}-base-${OS_TAG}"
         DETECTED_PYTORCH_INDEX="https://download.pytorch.org/whl/cu110"
         DETECTED_TORCH="1.7.1+cu110"
         DETECTED_TORCHAUDIO="0.7.2"
+
+        DETECTED_MMS_BASE_IMAGE="pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime"
+        DETECTED_MMS_PYTORCH_INDEX="https://download.pytorch.org/whl/cu118"
+        DETECTED_MMS_TORCHAUDIO="2.1.2"
     fi
 fi
 
@@ -55,8 +80,14 @@ export PYTORCH_INDEX_URL=${PYTORCH_INDEX_URL:-${DETECTED_PYTORCH_INDEX:-$DEFAULT
 export TORCH_VERSION=${TORCH_VERSION:-${DETECTED_TORCH:-$DEFAULT_TORCH}}
 export TORCHAUDIO_VERSION=${TORCHAUDIO_VERSION:-${DETECTED_TORCHAUDIO:-$DEFAULT_TORCHAUDIO}}
 
+export MMS_BASE_IMAGE=${MMS_BASE_IMAGE:-${DETECTED_MMS_BASE_IMAGE:-$DEFAULT_MMS_BASE_IMAGE}}
+export MMS_PYTORCH_INDEX_URL=${MMS_PYTORCH_INDEX_URL:-${DETECTED_MMS_PYTORCH_INDEX:-$DEFAULT_MMS_PYTORCH_INDEX}}
+export MMS_TORCHAUDIO_VERSION=${MMS_TORCHAUDIO_VERSION:-${DETECTED_MMS_TORCHAUDIO:-$DEFAULT_MMS_TORCHAUDIO}}
+
 echo "✅ 環境解析完成:"
 echo "   OS Base: $OS_TAG"
 echo "   Docker Tag: $BASE_IMAGE_TAG"
 echo "   CUDA: $CUDA_VERSION"
 echo "   Torch: $TORCH_VERSION"
+echo "   MMS Image: $MMS_BASE_IMAGE"
+echo "   MMS TorchAudio: $MMS_TORCHAUDIO_VERSION"

@@ -45,6 +45,10 @@ services:
     build:
       context: ./mms_service
       dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${MMS_BASE_IMAGE:-pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime}
+        TORCHAUDIO_VERSION: ${MMS_TORCHAUDIO_VERSION:-2.1.2}
+        PYTORCH_INDEX_URL: ${MMS_PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu118}
     image: mms-aligner-service:latest
     container_name: mms_aligner_api
     ports:
