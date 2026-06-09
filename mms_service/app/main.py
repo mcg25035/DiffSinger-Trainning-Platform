@@ -6,6 +6,7 @@ import logging
 import threading
 import json
 import time
+import concurrent.futures
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -41,9 +42,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger.info(f"Using device: {device}")
 
 if device.type == "cpu":
-    num_threads = os.cpu_count() or 4
+    # Reserve at least 2 cores for Uvicorn / OS to prevent socket hangup
+    num_threads = max(1, (os.cpu_count() or 4) - 2)
     torch.set_num_threads(num_threads)
-    logger.info(f"Set PyTorch CPU threads to {num_threads}")
+    logger.info(f"Set PyTorch CPU threads to {num_threads} (reserved 2 cores for web server)")
 
 # Load MMS_FA Aligner resources
 logger.info("Loading MMS_FA Model bundle...")
@@ -249,6 +251,9 @@ def run_training_loop(epochs: int, lr: float):
                     torch.nn.utils.clip_grad_norm_(model.model.aux.parameters(), max_norm=1.0)
                     optimizer.step()
                     epoch_loss += loss.item()
+                
+                # Yield GIL to allow Uvicorn to handle status / health requests
+                time.sleep(0.01)
                     
             avg_loss = epoch_loss / len(dataset)
             
@@ -328,11 +333,14 @@ def align_audio_to_phonemes(waveform: torch.Tensor, sr: int, phonemes: List[str]
         with torch.inference_mode():
             with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16 if "cuda" in str(device) else torch.bfloat16):
                 emissions, _ = model(waveform)
+            # Move to CPU and clone/detach to release GPU memory and lock safely
+            emissions = emissions.cpu().detach().clone()
             
         if training_head_backup is not None:
             model.model.aux.load_state_dict({k: v.to(device) for k, v in training_head_backup.items()})
             
-        spans = aligner(emissions[0], token_ids)
+    # Release model_lock before running CTC aligner on CPU
+    spans = aligner(emissions[0], token_ids)
         
     final_segs = []
     for i, word_spans in enumerate(spans):
@@ -503,7 +511,9 @@ def align_batch(
             raise HTTPException(status_code=400, detail=f"Invalid lyrics_json: {e}")
             
         results = {}
+        tasks = []
         
+        # 1. Save all uploaded files to temp paths sequentially (fast IO)
         for wav_file in wavs:
             filename = wav_file.filename
             if filename not in lyrics_dict:
@@ -522,34 +532,48 @@ def align_batch(
             try:
                 with temp_wav.open("wb") as buffer:
                     shutil.copyfileobj(wav_file.file, buffer)
-                    
-                waveform, sr = torchaudio.load(str(temp_wav))
-                
-                alignment = align_audio_to_phonemes(waveform, sr, phonemes)
+                tasks.append((filename, temp_wav, phonemes))
+            except Exception as e:
+                logger.error(f"Failed to save {filename}: {e}")
+                results[filename] = f"ERROR: Failed to save file: {e}"
+                if temp_wav.exists():
+                    temp_wav.unlink()
+
+        # 2. Process alignment tasks in parallel
+        def process_single_file(filename, temp_wav_path, phonemes_list):
+            try:
+                waveform, sr = torchaudio.load(str(temp_wav_path))
+                alignment = align_audio_to_phonemes(waveform, sr, phonemes_list)
                 
                 # Format in the HTK-like format with times in 100ns (1e-7 s)
                 lines = []
                 for seg in alignment:
-                    # seg["start"] is in ms. Convert to 100ns: ms * 10000
                     start_100ns = int(seg["start"] * 10000)
                     end_100ns = int(seg["end"] * 10000)
                     lines.append(f"{start_100ns} {end_100ns} {seg['label']}")
                 lines.append("# STATUS: SUCCESS")
-                results[filename] = "\n".join(lines)
-                
+                return filename, "\n".join(lines)
             except Exception as e:
                 logger.error(f"Alignment failed for {filename}: {e}")
-                results[filename] = f"ERROR: {e}"
+                return filename, f"ERROR: {e}"
             finally:
-                if temp_wav.exists():
-                    temp_wav.unlink()
+                if temp_wav_path.exists():
+                    temp_wav_path.unlink()
+
+        # Reserve at least 2 cores for Uvicorn to ensure status checks respond under load
+        max_workers = max(1, (os.cpu_count() or 4) - 2)
+        max_workers = min(len(tasks), max_workers)
+        if max_workers > 0:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(process_single_file, fname, twav, phs) for fname, twav, phs in tasks]
+                for future in concurrent.futures.as_completed(futures):
+                    fname, res = future.result()
+                    results[fname] = res
                     
         return results
     finally:
         with align_counter_lock:
             active_align_requests -= 1
-                
-    return results
 
 @app.get("/health")
 async def health():
