@@ -721,6 +721,18 @@ app.get('/api/mms/health', async (req, res) => {
     }
 });
 
+app.delete('/api/mms/model', async (req, res) => {
+    try {
+        const result = await mmsService.deleteModel();
+        if (fs.existsSync(fingerprintPath)) {
+            fs.unlinkSync(fingerprintPath);
+        }
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/api/lyrics', express.json(), (req, res) => {
     const { filename, lyrics } = req.body;
     if (!filename || lyrics === undefined) return res.status(400).send('Missing data');

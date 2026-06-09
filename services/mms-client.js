@@ -83,4 +83,17 @@ async function healthCheck() {
     return mmsClient.healthCheck();
 }
 
-module.exports = { alignBatch, train, getStatus, getDictionary, healthCheck };
+/**
+ * Delete fine-tuned model
+ * @returns {Promise<object>}
+ */
+async function deleteModel() {
+    const response = await mmsClient.request({
+        method: 'DELETE',
+        url: '/model',
+        timeout: 10000,
+    });
+    return response.data;
+}
+
+module.exports = { alignBatch, train, getStatus, getDictionary, healthCheck, deleteModel };
