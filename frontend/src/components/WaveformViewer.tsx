@@ -50,7 +50,13 @@ export const WaveformViewer = memo(({ url, threshold, onReady }: WaveformProps) 
       onReady(ws, regions);
     });
 
-    ws.load(url);
+    ws.load(url).catch((err) => {
+      if (err.name === 'AbortError') {
+        console.log('WaveformViewer load aborted.');
+      } else {
+        console.error('WaveformViewer load error:', err);
+      }
+    });
 
     return () => {
         containerRef.current?.removeEventListener('wheel', handleWheel);

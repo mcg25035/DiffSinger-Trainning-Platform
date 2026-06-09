@@ -162,7 +162,14 @@ export function useWaveSurfer({
       passive: false,
     });
 
-    ws.load(url);
+    ws.load(url).catch((err) => {
+      if (err.name === 'AbortError') {
+        // Expected when wavesurfer is destroyed or URL changes mid-flight
+        console.log('WaveSurfer load aborted.');
+      } else {
+        console.error('WaveSurfer load error:', err);
+      }
+    });
 
     return () => {
       containerRef.current?.removeEventListener('wheel', handleWheel);

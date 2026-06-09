@@ -66,7 +66,9 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
     if (!el) return;
 
     const observer = new ResizeObserver(() => {
-      const height = el.clientHeight;
+      // 使用 offsetHeight 代替 clientHeight，以避免因為水平捲軸出現/消失而減少 clientHeight，
+      // 從而引發 ResizeObserver 與 React state 更新的無限銷毀/重構迴圈。
+      const height = el.offsetHeight;
       if (height > 0) {
         setContainerHeight((prev) => {
           // 避免微小的版面晃動（例如播放時按鈕框線微調或捲軸出現）導致 wavesurfer 被銷毀重構。
