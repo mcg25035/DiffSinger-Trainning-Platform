@@ -89,7 +89,7 @@ source "$PROJECT_ROOT/scripts/resolve_env.sh" || true
 
 # 偵測 GPU → compose files
 COMPOSE_CMD="docker compose -f docker-compose.yml"
-if command -v nvidia-smi &>/dev/null; then
+if command -v nvidia-smi &>/dev/null || [ -f /usr/bin/nvidia-smi ] || [ -f /usr/sbin/nvidia-smi ] || [ -f /usr/local/cuda/bin/nvidia-smi ] || [ -f /usr/local/nvidia/bin/nvidia-smi ]; then
     COMPOSE_CMD="$COMPOSE_CMD -f docker-compose.gpu.yml"
 fi
 

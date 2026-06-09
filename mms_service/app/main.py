@@ -40,6 +40,11 @@ WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger.info(f"Using device: {device}")
 
+if device.type == "cpu":
+    num_threads = os.cpu_count() or 4
+    torch.set_num_threads(num_threads)
+    logger.info(f"Set PyTorch CPU threads to {num_threads}")
+
 # Load MMS_FA Aligner resources
 logger.info("Loading MMS_FA Model bundle...")
 bundle = torchaudio.pipelines.MMS_FA
@@ -438,7 +443,7 @@ async def get_status():
         return training_state
 
 @app.post("/align")
-async def align(
+def align(
     audio: UploadFile = File(...),
     lyrics: str = Form(...)
 ):
@@ -482,7 +487,7 @@ async def align(
             active_align_requests -= 1
 
 @app.post("/align_batch")
-async def align_batch(
+def align_batch(
     wavs: List[UploadFile] = File(...),
     lyrics_json: str = Form(...)
 ):
