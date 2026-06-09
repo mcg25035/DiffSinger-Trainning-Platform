@@ -151,6 +151,70 @@ export const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, 
     alert(`批次辨識完成！\n成功: ${successCount} 個音訊片段\n失敗: ${failCount} 個音訊片段`);
   };
 
+  const toggleCheckAllSegments = async () => {
+    const allChecked = uploadSegments.every(s => s.isChecked);
+    const nextChecked = !allChecked;
+
+    try {
+      const promises = uploadSegments.map(s => 
+        fetch('/api/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: s.filename, checked: nextChecked })
+        })
+      );
+      await Promise.all(promises);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update checked status for all segments');
+    }
+  };
+
+  const handleBatchAlign = async () => {
+    const targets = uploadSegments.filter(s => s.isChecked);
+    if (targets.length === 0) {
+      alert("請先勾選要進行批次對齊的片段！");
+      return;
+    }
+
+    if (!selectedDictId) {
+      alert("請選擇語言詞典！");
+      return;
+    }
+
+    const activeAligner = selectedAligner || 'mfa';
+
+    // Overwrite confirmation (only once!)
+    const hasExisting = targets.some(t => t.hasAlignment);
+    if (hasExisting) {
+      if (!confirm(`所選的 ${targets.length} 個片段中，有些已存在對齊數據。重新對齊將會覆蓋它們。是否繼續？`)) {
+        return;
+      }
+    }
+
+    try {
+      // Trigger all alignments in parallel
+      const promises = targets.map(async (t) => {
+        const res = await fetch('/api/align', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: t.filename, dictionaryId: selectedDictId, aligner: activeAligner })
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(`對齊 ${t.filename} 失敗: ${txt}`);
+        }
+      });
+
+      await Promise.all(promises);
+      onRefresh();
+    } catch (err: any) {
+      console.error(err);
+      alert(`批次對齊啟動時發生錯誤: ${err.message}`);
+    }
+  };
+
   return (
     <div style={{ 
       flex: 1, 
@@ -262,9 +326,46 @@ export const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, 
       </div>
       <div style={{ height: '1px', background: '#333' }} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-         <h2 style={{ fontSize: '11px', margin: '0 0 16px 0', color: '#00e676', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase' }}>
-           Upload Segments ({uploadSegments.length})
-         </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 16px 0' }}>
+            <h2 style={{ fontSize: '11px', margin: 0, color: '#00e676', fontWeight: '900', letterSpacing: '2px', textTransform: 'uppercase' }}>
+              Upload Segments ({uploadSegments.length})
+            </h2>
+            {uploadSegments.length > 0 && (
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button
+                  onClick={toggleCheckAllSegments}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#888',
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    padding: 0
+                  }}
+                >
+                  {uploadSegments.every(s => s.isChecked) ? 'Deselect All' : 'Select All'}
+                </button>
+                <button
+                  onClick={handleBatchAlign}
+                  style={{
+                    background: 'rgba(0, 230, 118, 0.1)',
+                    border: '1px solid rgba(0, 230, 118, 0.3)',
+                    borderRadius: '8px',
+                    color: '#00e676',
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    padding: '2px 8px',
+                    transition: 'background 0.2s'
+                  }}
+                  title={`Batch align checked segments using ${selectedAligner.toUpperCase()}`}
+                >
+                  Batch {selectedAligner.toUpperCase()}
+                </button>
+              </div>
+            )}
+          </div>
          <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
            <RecordingList 
              recordings={uploadSegments} 
