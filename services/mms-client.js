@@ -79,8 +79,22 @@ async function getDictionary() {
  * Health check
  * @returns {Promise<{ ok: boolean, latencyMs: number, error?: string }>}
  */
+/**
+ * Health check
+ * @returns {Promise<{ ok: boolean, latencyMs: number, fine_tuned_weights_exist?: boolean, device?: string, error?: string }>}
+ */
 async function healthCheck() {
-    return mmsClient.healthCheck();
+    const start = Date.now();
+    try {
+        const response = await mmsClient.request({
+            method: 'GET',
+            url: '/health',
+            timeout: 5000,
+        });
+        return { ok: true, latencyMs: Date.now() - start, ...response.data };
+    } catch (err) {
+        return { ok: false, latencyMs: Date.now() - start, error: err.message };
+    }
 }
 
 /**
@@ -96,4 +110,30 @@ async function deleteModel() {
     return response.data;
 }
 
-module.exports = { alignBatch, train, getStatus, getDictionary, healthCheck, deleteModel };
+/**
+ * Reload fine-tuned model weights from disk
+ * @returns {Promise<object>}
+ */
+async function reloadModel() {
+    const response = await mmsClient.request({
+        method: 'POST',
+        url: '/model/reload',
+        timeout: 10000,
+    });
+    return response.data;
+}
+
+/**
+ * Stop training
+ * @returns {Promise<object>}
+ */
+async function stopTraining() {
+    const response = await mmsClient.request({
+        method: 'POST',
+        url: '/train/stop',
+        timeout: 10000,
+    });
+    return response.data;
+}
+
+module.exports = { alignBatch, train, getStatus, getDictionary, healthCheck, deleteModel, reloadModel, stopTraining };

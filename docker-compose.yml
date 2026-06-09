@@ -1,5 +1,7 @@
 services:
   mfa-service:
+    deploy:
+      replicas: 0
     build:
       context: ./mfa/mfa_service
       dockerfile: Dockerfile
@@ -19,6 +21,8 @@ services:
       start_period: 60s
 
   sensevoice-hira-api:
+    deploy:
+      replicas: 0
     build:
       context: ./lyrics_regonizer
       args:

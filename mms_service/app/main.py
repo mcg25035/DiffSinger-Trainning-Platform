@@ -1,4 +1,5 @@
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
 import uuid
 import shutil
 import logging
@@ -58,6 +59,7 @@ model_lock = threading.Lock()
 training_lock = threading.Lock()
 align_counter_lock = threading.Lock()
 active_align_requests = 0
+training_should_stop = False
 
 # Global Training State
 training_state = {
@@ -111,12 +113,13 @@ def parse_lyrics_to_phonemes(lyrics_str: str) -> List[str]:
 
 def run_training_loop(epochs: int, lr: float):
     """Executes the CTC projection layer fine-tuning loop."""
-    global training_state
+    global training_state, training_should_stop
     
     with training_lock:
         if training_state["status"] in ("training", "paused"):
             logger.warning("Training is already running or paused, skipping execution.")
             return
+        training_should_stop = False
         training_state["status"] = "training"
         training_state["current_epoch"] = 0
         training_state["total_epochs"] = epochs
@@ -190,11 +193,19 @@ def run_training_loop(epochs: int, lr: float):
         
         # Fine-tuning loop
         for epoch in range(epochs):
+            if training_should_stop:
+                raise RuntimeError("Training stopped by user.")
+            with training_lock:
+                training_state["current_epoch"] = epoch + 1
             epoch_loss = 0.0
             for item in dataset:
+                if training_should_stop:
+                    raise RuntimeError("Training stopped by user.")
                 # Pause training if there are active alignment requests
                 paused_logged = False
                 while True:
+                    if training_should_stop:
+                        raise RuntimeError("Training stopped by user.")
                     with align_counter_lock:
                         if active_align_requests == 0:
                             break
@@ -212,13 +223,16 @@ def run_training_loop(epochs: int, lr: float):
 
                 # Keep lock during forward/backward steps to prevent inference conflicts
                 with model_lock:
+                    torch.cuda.empty_cache()
                     model.train()
                     optimizer.zero_grad()
                     wf = item["waveform"].unsqueeze(0).to(device)
                     targets = item["targets"].unsqueeze(0).to(device)
                     
-                    emissions, _ = model(wf)
-                    log_probs = torch.nn.functional.log_softmax(emissions, dim=-1)
+                    with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16):
+                        emissions, _ = model(wf)
+                        log_probs = torch.nn.functional.log_softmax(emissions, dim=-1)
+                    
                     log_probs = log_probs.transpose(0, 1)
                     
                     input_lengths = torch.tensor([log_probs.size(0)], dtype=torch.int32, device=device)
@@ -234,7 +248,6 @@ def run_training_loop(epochs: int, lr: float):
             avg_loss = epoch_loss / len(dataset)
             
             with training_lock:
-                training_state["current_epoch"] = epoch + 1
                 training_state["current_loss"] = avg_loss
                 training_state["history"].append({"epoch": epoch + 1, "loss": avg_loss})
                 
@@ -254,8 +267,11 @@ def run_training_loop(epochs: int, lr: float):
     except Exception as e:
         logger.error(f"Error during training: {e}")
         with training_lock:
-            training_state["status"] = "error"
-            training_state["error_message"] = str(e)
+            if str(e) == "Training stopped by user.":
+                training_state["status"] = "idle"
+            else:
+                training_state["status"] = "error"
+                training_state["error_message"] = str(e)
 
 def align_audio_to_phonemes(waveform: torch.Tensor, sr: int, phonemes: List[str]) -> List[Dict[str, Any]]:
     """Align waveform with phonemes sequence using the loaded model."""
@@ -303,8 +319,10 @@ def align_audio_to_phonemes(waveform: torch.Tensor, sr: int, phonemes: List[str]
                     logger.error(f"Failed to load stable weights: {e}")
 
         model.eval()
+        torch.cuda.empty_cache()
         with torch.inference_mode():
-            emissions, _ = model(waveform)
+            with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16):
+                emissions, _ = model(waveform)
             
         if training_head_backup is not None:
             model.model.aux.load_state_dict({k: v.to(device) for k, v in training_head_backup.items()})
@@ -541,3 +559,32 @@ async def health():
 async def get_dictionary():
     """Returns the vocabulary dictionary keys of the MMS-FA model."""
     return list(dictionary.keys())
+
+@app.delete("/model")
+async def delete_model():
+    """Deletes the fine-tuned model and restores base weights."""
+    with model_lock:
+        if MODEL_WEIGHTS_PATH.exists():
+            MODEL_WEIGHTS_PATH.unlink()
+            logger.info("Fine-tuned weights deleted.")
+            model.model.aux.load_state_dict({k: v.to(device) for k, v in base_head_state_dict.items()})
+            return {"status": "success", "message": "Fine-tuned model deleted and base weights restored."}
+        else:
+            return {"status": "success", "message": "No fine-tuned model found."}
+
+@app.post("/model/reload")
+async def reload_model():
+    """Reloads the fine-tuned model weights from disk."""
+    load_latest_weights()
+    return {"status": "success", "message": "Model weights reloaded."}
+
+@app.post("/train/stop")
+async def stop_training():
+    """Stops the active training loop."""
+    global training_should_stop
+    with training_lock:
+        if training_state["status"] in ("training", "paused"):
+            training_should_stop = True
+            return {"status": "success", "message": "Training stop requested."}
+        else:
+            return {"status": "success", "message": "No active training session to stop."}

@@ -16,3 +16,11 @@ check_coverage.py
 update_verify.py
 dev.log
 *.pyc
+*.wav
+*.lab
+*.checked
+*.conf
+*.txt
+*.zip
+*.pth
+*.tar.gz

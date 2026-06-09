@@ -91,6 +91,88 @@ export function MmsTrainingManager({ onClose, dictionaryId }: MmsTrainingManager
     }
   };
 
+  const handleDeleteModel = async () => {
+    if (!confirm('Are you sure you want to delete the fine-tuned model and revert to base weights?')) return;
+    
+    try {
+      const res = await fetch('/api/mms/model', { method: 'DELETE' });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccessMsg(data.message || 'Model deleted successfully');
+        fetchHealth();
+        fetchStatus();
+      } else {
+        setErrorMsg(data.error || 'Failed to delete model');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Network error');
+    }
+  };
+
+  const handleDownloadWeights = () => {
+    window.location.href = '/api/mms/model/download';
+  };
+
+  const handleUploadWeights = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.pth')) {
+      setErrorMsg('Please upload a valid PyTorch weights file (.pth)');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('model', file);
+
+    setIsSyncing(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await fetch('/api/mms/model/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setSuccessMsg(data.message || 'Model weights uploaded and loaded successfully');
+        fetchHealth();
+        fetchStatus();
+      } else {
+        setErrorMsg(data.error || 'Failed to upload weights');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Network error');
+    } finally {
+      setIsSyncing(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleStopTraining = async () => {
+    if (!confirm('Are you sure you want to stop the active training session? Current progress will be lost.')) return;
+    
+    setIsSyncing(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const res = await fetch('/api/mms/train/stop', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccessMsg(data.message || 'Training stop requested.');
+        fetchStatus();
+      } else {
+        setErrorMsg(data.error || 'Failed to stop training');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Network error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const isTraining = statusData?.status === 'training' || statusData?.status === 'paused';
 
   return (
@@ -221,6 +303,58 @@ export function MmsTrainingManager({ onClose, dictionaryId }: MmsTrainingManager
             </div>
           </div>
 
+          <div style={{ background: '#121212', border: '1px solid #222', borderRadius: '16px', padding: '20px' }}>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '700', textTransform: 'uppercase', color: '#888' }}>
+              Model Weights Backup
+            </h3>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={handleDownloadWeights}
+                disabled={!fineTunedExists || isTraining || isSyncing}
+                style={{
+                  flex: 1,
+                  background: (!fineTunedExists || isTraining || isSyncing) ? '#222' : 'rgba(0, 176, 255, 0.1)',
+                  color: (!fineTunedExists || isTraining || isSyncing) ? '#555' : '#00b0ff',
+                  border: (!fineTunedExists || isTraining || isSyncing) ? '1px solid #333' : '1px solid rgba(0, 176, 255, 0.3)',
+                  borderRadius: '8px',
+                  padding: '10px',
+                  fontWeight: 'bold',
+                  fontSize: '13px',
+                  cursor: (!fineTunedExists || isTraining || isSyncing) ? 'not-allowed' : 'pointer',
+                  transition: 'background 0.2s, color 0.2s'
+                }}
+              >
+                Download (.pth)
+              </button>
+              <label
+                style={{
+                  flex: 1,
+                  background: (isTraining || isSyncing) ? '#222' : 'rgba(0, 230, 118, 0.1)',
+                  color: (isTraining || isSyncing) ? '#555' : '#00e676',
+                  border: (isTraining || isSyncing) ? '1px solid #333' : '1px solid rgba(0, 230, 118, 0.3)',
+                  borderRadius: '8px',
+                  padding: '10px',
+                  fontWeight: 'bold',
+                  fontSize: '13px',
+                  cursor: (isTraining || isSyncing) ? 'not-allowed' : 'pointer',
+                  textAlign: 'center',
+                  display: 'inline-block',
+                  boxSizing: 'border-box',
+                  transition: 'background 0.2s, color 0.2s'
+                }}
+              >
+                Upload Weights
+                <input
+                  type="file"
+                  accept=".pth"
+                  onChange={handleUploadWeights}
+                  disabled={isTraining || isSyncing}
+                  style={{ display: 'none' }}
+                />
+              </label>
+            </div>
+          </div>
+
           {errorMsg && (
             <div style={{ background: 'rgba(255, 77, 77, 0.1)', border: '1px solid rgba(255, 77, 77, 0.2)', borderRadius: '12px', padding: '12px 16px', color: '#ff4d4d', fontSize: '13px' }}>
               <strong>Error:</strong> {errorMsg}
@@ -233,25 +367,69 @@ export function MmsTrainingManager({ onClose, dictionaryId }: MmsTrainingManager
             </div>
           )}
 
+          {isTraining ? (
+            <button
+              onClick={handleStopTraining}
+              disabled={isSyncing}
+              style={{
+                background: 'linear-gradient(135deg, #ff1744 0%, #ff5252 100%)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '12px',
+                padding: '16px',
+                fontWeight: '800',
+                fontSize: '15px',
+                cursor: isSyncing ? 'not-allowed' : 'pointer',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                boxShadow: '0 4px 15px rgba(255, 23, 68, 0.3)',
+                transition: 'transform 0.2s, opacity 0.2s'
+              }}
+            >
+              Stop Fine-Tuning
+            </button>
+          ) : (
+            <button
+              onClick={handleStartTraining}
+              disabled={isSyncing}
+              style={{
+                background: 'linear-gradient(135deg, #00e676 0%, #00b0ff 100%)',
+                color: '#000',
+                border: 'none',
+                borderRadius: '12px',
+                padding: '16px',
+                fontWeight: '800',
+                fontSize: '15px',
+                cursor: isSyncing ? 'not-allowed' : 'pointer',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                boxShadow: '0 4px 15px rgba(0, 230, 118, 0.2)',
+                transition: 'transform 0.2s, opacity 0.2s'
+              }}
+            >
+              {isSyncing ? 'Syncing segments...' : 'Sync & Start Fine-Tuning'}
+            </button>
+          )}
+
           <button
-            onClick={handleStartTraining}
-            disabled={isTraining || isSyncing}
+            onClick={handleDeleteModel}
+            disabled={!fineTunedExists || isTraining || isSyncing}
             style={{
-              background: isTraining ? '#222' : 'linear-gradient(135deg, #00e676 0%, #00b0ff 100%)',
-              color: isTraining ? '#555' : '#000',
-              border: 'none',
+              background: (!fineTunedExists || isTraining || isSyncing) ? '#222' : 'rgba(255, 77, 77, 0.1)',
+              color: (!fineTunedExists || isTraining || isSyncing) ? '#555' : '#ff4d4d',
+              border: (!fineTunedExists || isTraining || isSyncing) ? '1px solid #333' : '1px solid rgba(255, 77, 77, 0.3)',
               borderRadius: '12px',
               padding: '16px',
               fontWeight: '800',
               fontSize: '15px',
-              cursor: isTraining || isSyncing ? 'not-allowed' : 'pointer',
+              cursor: (!fineTunedExists || isTraining || isSyncing) ? 'not-allowed' : 'pointer',
               textTransform: 'uppercase',
               letterSpacing: '0.5px',
-              boxShadow: isTraining ? 'none' : '0 4px 15px rgba(0, 230, 118, 0.2)',
-              transition: 'transform 0.2s, opacity 0.2s'
+              transition: 'background 0.2s, color 0.2s'
             }}
+            title={!fineTunedExists ? 'No fine-tuned model to delete' : 'Delete fine-tuned model'}
           >
-            {isSyncing ? 'Syncing segments...' : statusData?.status === 'paused' ? 'Fine-Tuning Paused...' : isTraining ? 'Fine-Tuning in Progress...' : 'Sync & Start Fine-Tuning'}
+            Delete Fine-Tuned Model
           </button>
         </div>
 

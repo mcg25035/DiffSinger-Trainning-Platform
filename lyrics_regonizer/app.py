@@ -1,9 +1,12 @@
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
 import re
 import sys
 import uvicorn
 import shutil
 import pykakasi
+import gc
+import torch
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
@@ -174,6 +177,9 @@ async def transcribe(file: UploadFile = File(...)):
             "romaji": romaji_text
         }
     finally:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
@@ -211,6 +217,9 @@ async def transcribe_with_lyrics(file: UploadFile = File(...), full_lyrics: str 
             "match_score": match_score
         }
     finally:
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         if os.path.exists(temp_path):
             os.remove(temp_path)
 

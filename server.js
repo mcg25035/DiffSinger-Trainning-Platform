@@ -667,6 +667,16 @@ app.post('/api/mms/sync-train', express.json(), async (req, res) => {
     }
 });
 
+app.post('/api/mms/train/stop', async (req, res) => {
+    try {
+        const result = await mmsService.stopTraining();
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 // 非 dev 的正式環境：定期檢查並跑客製化微調
 if (IS_PROD) {
     console.log('[MMS-AUTO-TRAIN] Production mode. Scheduling periodic auto-training check.');
@@ -728,6 +738,47 @@ app.delete('/api/mms/model', async (req, res) => {
             fs.unlinkSync(fingerprintPath);
         }
         res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+const weightsStorage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const dir = path.join(__dirname, 'mms_service/data/weights');
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        cb(null, dir);
+    },
+    filename: function (req, file, cb) {
+        cb(null, 'mms_fine_tuned_head.pth');
+    }
+});
+const uploadWeights = multer({ storage: weightsStorage });
+
+app.get('/api/mms/model/download', (req, res) => {
+    const weightsPath = path.join(__dirname, 'mms_service/data/weights/mms_fine_tuned_head.pth');
+    if (fs.existsSync(weightsPath)) {
+        res.download(weightsPath, 'mms_fine_tuned_head.pth');
+    } else {
+        res.status(404).json({ error: 'No fine-tuned model weights found' });
+    }
+});
+
+app.post('/api/mms/model/upload', uploadWeights.single('model'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+        
+        await mmsService.reloadModel();
+
+        if (fs.existsSync(fingerprintPath)) {
+            fs.unlinkSync(fingerprintPath);
+        }
+
+        res.json({ message: 'Model weights uploaded and loaded successfully.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
