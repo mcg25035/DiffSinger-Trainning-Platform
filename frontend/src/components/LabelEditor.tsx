@@ -129,6 +129,7 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
       } else {
         // 第一次載入，自 API 讀取
         persistence.loadLabels(duration).then((segments) => {
+          if (wavesurfer.wavesurferRef.current !== ws) return;
           if (segments.length > 0) {
             loadWordAlignmentMap(recording.filename, segments);
             regionMgr.loadRegions(segments, regions);
