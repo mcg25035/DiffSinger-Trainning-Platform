@@ -2,11 +2,11 @@
  * PhonemeEditPanel — 選中 region 時的音素編輯面板
  */
 
-import type { Region } from 'wavesurfer.js/plugins/regions';
+import type { LabSegment } from '../../utils/labParser';
 import { focusAndSelectAll } from '../../utils/domUtils';
 
 interface Props {
-  selectedRegion: Region | null;
+  selectedRegion: LabSegment | null;
   isMultipleSelect?: boolean;
   editLabel: string;
   onEditLabelChange: (label: string) => void;

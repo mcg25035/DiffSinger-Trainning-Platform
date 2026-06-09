@@ -9,6 +9,7 @@
  */
 
 export interface LabSegment {
+  id?: string;
   start: number;
   end: number;
   label: string;

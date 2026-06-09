@@ -1,474 +1,351 @@
 /**
- * useRegionManager — Region CRUD + Undo + 鄰居邊界調整
+ * useRegionManager — Pure React State Annotation Manager
  *
  * 職責：
- *  - 從 LabSegment[] 建立 regions
- *  - 管理 selectedRegion / regionItems state
- *  - 提供 updateLabel / deleteSelected / split 等操作
- *  - Undo stack 管理
- *  - 鄰居邊界自動調整（region 拖拉時）
- *  - 每次變更後呼叫 onChange 通知外部
+ *  - 管理音素片段的單一資料源 (segments: LabSegment[])
+ *  - 所有的 CRUD (編輯標籤、切割、刪除、歌詞對齊索引) 皆為對 React state 的純資料操作
+ *  - 管理 selectedSegmentId, editLabel, undoStack, startPointerTime
+ *  - 完全不接觸 WaveSurfer 或 DOM
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import type React from 'react';
-import type { Region } from 'wavesurfer.js/plugins/regions';
-import type RegionsPlugin from 'wavesurfer.js/plugins/regions';
 import type { LabSegment } from '../utils/labParser';
-import {
-  createLabelElement,
-  applyRegionStyle,
-  getRegionLabel,
-  getRegionScore,
-  getRegionWordIndex,
-} from '../utils/regionStyle';
-import { stringifyFromRegions, parseLabFromString } from '../utils/labSerialization';
-import { updateRegionPositions, getShiftSelectionIds } from '../utils/regionPositionHelper';
+import { updateSegmentPositionsPure, getShiftSelectionIds } from '../utils/regionPositionHelper';
 
 export interface RegionItem {
   id: string;
   label: string;
-  region: Region;
+  start: number;
+  end: number;
   wordIndex?: number;
+  score?: number;
+  // 提供相容的 region 屬性，讓 UI 組件無痛對接
+  region: {
+    start: number;
+    end: number;
+  };
 }
 
 export interface UseRegionManagerReturn {
   // State
-  selectedRegion: Region | null;
-  selectedRegionIds: Set<string>;
+  segments: LabSegment[];
+  setSegments: React.Dispatch<React.SetStateAction<LabSegment[]>>;
+  selectedSegmentId: string | null;
+  selectedSegment: LabSegment | null;
+  selectedRegion: LabSegment | null; // 相容別名
+  selectedRegionIds: Set<string>; // 相容多選型別
   editLabel: string;
   labelsCount: number | null;
   regionItems: RegionItem[];
   startPointerTime: number;
   // Actions
-  setSelectedRegion: (region: Region | null) => void;
+  setSelectedSegmentId: (id: string | null) => void;
+  setSelectedRegion: (segment: LabSegment | null) => void; // 相容別名
   setEditLabel: (label: string) => void;
-  loadRegions: (segments: LabSegment[], regions: RegionsPlugin) => void;
-  renderSegments: (segments: LabSegment[], regions: RegionsPlugin) => void;
+  loadSegments: (segments: LabSegment[]) => void;
   updateLabel: (labelOverride?: string) => void;
+  updateSegmentWordIndex: (regionId: string, wordIndex: number | undefined) => void;
+  updateRegionWordIndex: (regionId: string, wordIndex: number | undefined) => void; // 相容別名
   deleteSelected: () => void;
   splitAtTime: (time: number) => void;
-  handleRegionUpdate: (region: Region) => void;
-  handleRegionUpdated: (region: Region) => void;
-  handleRegionClicked: (region: Region, e?: MouseEvent | React.MouseEvent) => void;
-  refreshRegionsState: () => void;
+  handleSegmentDrag: (
+    id: string,
+    newStart: number,
+    newEnd: number,
+    cachedMap: Map<string, { start: number; end: number }>
+  ) => void;
+  handleSegmentDragEnd: (
+    id: string,
+    newStart: number,
+    newEnd: number,
+    cachedMap: Map<string, { start: number; end: number }>
+  ) => void;
+  handleSegmentClicked: (id: string, e?: MouseEvent | React.MouseEvent) => void;
+  handleRegionClicked: (region: { id: string }, e?: MouseEvent | React.MouseEvent) => void; // 相容別名
   undo: () => void;
   saveHistory: () => void;
-  updateRegionWordIndex: (regionId: string, wordIndex: number | undefined) => void;
-  /** 取得當前所有 regions 的 LabSegment 表示 */
   getCurrentSegments: () => LabSegment[];
   setStartPointerTime: (time: number) => void;
-  recreateStartPointer: (regions: RegionsPlugin, time?: number) => void;
 }
 
 export function useRegionManager(
-  regionsRef: React.MutableRefObject<RegionsPlugin | null>,
   onChange?: () => void
 ): UseRegionManagerReturn {
-  const [selectedRegion, setSelectedRegionState] = useState<Region | null>(null);
-  const [selectedRegionIds, setSelectedRegionIds] = useState<Set<string>>(new Set());
+  const [segments, setSegmentsState] = useState<LabSegment[]>([]);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(new Set());
   const [editLabel, setEditLabel] = useState('');
-  const [labelsCount, setLabelsCount] = useState<number | null>(null);
-  const [regionItems, setRegionItems] = useState<RegionItem[]>([]);
+  const [startPointerTime, setStartPointerTime] = useState(0);
 
-  // Start pointer states
-  const [startPointerTime, setStartPointerTimeState] = useState(0);
-  const startPointerTimeRef = useRef(0);
-
-  const setStartPointerTime = useCallback((time: number) => {
-    startPointerTimeRef.current = time;
-    setStartPointerTimeState(time);
-  }, []);
-
-  const recreateStartPointer = useCallback((regions: RegionsPlugin, time?: number) => {
-    const existing = regions.getRegions().find((r) => r.id === 'start-pointer');
-    if (existing) {
-      existing.remove();
-    }
-    const t = time !== undefined ? time : startPointerTimeRef.current;
-    regions.addRegion({
-      id: 'start-pointer',
-      start: t,
-      end: t + 0.05,
-      drag: true,
-      resize: false,
-      color: 'transparent',
-    });
-  }, []);
-
-  const isUpdatingRef = useRef(false);
   const undoStackRef = useRef<string[]>([]);
-  const lastSegmentsRef = useRef<LabSegment[]>([]);
-  const dragStartPositionsRef = useRef<Map<string, { start: number; end: number }> | null>(null);
 
-  const setSelectedRegion = useCallback((r: Region | null) => {
-    setSelectedRegionState(r);
-    if (r) {
-      setSelectedRegionIds(new Set([r.id]));
-    } else {
-      setSelectedRegionIds(new Set());
-    }
+  // 封裝 state setter，以在每次資料異動後觸發 onChange 回呼 (自動存檔等)
+  const setSegments = useCallback(
+    (value: React.SetStateAction<LabSegment[]>) => {
+      setSegmentsState((prev) => {
+        const next = typeof value === 'function' ? value(prev) : value;
+        // 排程觸發通知
+        setTimeout(() => onChange?.(), 0);
+        return next;
+      });
+    },
+    [onChange]
+  );
+
+  // 取得當前選取的段落
+  const selectedSegment = useMemo(() => {
+    return segments.find((s) => s.id === selectedSegmentId) || null;
+  }, [segments, selectedSegmentId]);
+
+  // 計算標籤個數
+  const labelsCount = useMemo(() => {
+    return segments.length;
+  }, [segments]);
+
+  // 將 segments 轉為給 UI 組件使用的 RegionItem
+  const regionItems = useMemo<RegionItem[]>(() => {
+    return segments
+      .sort((a, b) => a.start - b.start)
+      .map((s) => ({
+        id: s.id || '',
+        label: s.label,
+        start: s.start,
+        end: s.end,
+        wordIndex: s.wordIndex,
+        score: s.score,
+        region: {
+          start: s.start,
+          end: s.end,
+        },
+      }));
+  }, [segments]);
+
+  // 載入全新資料
+  const loadSegments = useCallback((rawSegments: LabSegment[]) => {
+    const segmentsWithIds = rawSegments.map((s) => ({
+      ...s,
+      id: s.id || `seg-${Math.random().toString(36).substring(2, 9)}`,
+    }));
+    setSegmentsState(segmentsWithIds);
+    setSelectedSegmentId(null);
+    setSelectedSegmentIds(new Set());
+    // 初始化歷史紀錄
+    undoStackRef.current = [JSON.stringify(segmentsWithIds)];
   }, []);
 
-  // 刷新 region state（從 DOM 讀取最新資料）
-  const refreshRegionsState = useCallback(() => {
-    if (!regionsRef.current) return;
-    const all = regionsRef.current
-      .getRegions()
-      .filter((r) => r.id !== 'start-pointer')
-      .sort((a: Region, b: Region) => a.start - b.start);
-    setLabelsCount(all.length);
-    setRegionItems(
-      all.map((r: Region) => ({
-        id: r.id,
-        label: getRegionLabel(r),
-        region: r,
-        wordIndex: getRegionWordIndex(r),
-      }))
-    );
-
-    // 暫存最新的 segments，避免 wavesurfer 銷毀時丟失修改進度
-    lastSegmentsRef.current = all.map((r: Region) => ({
-      start: r.start,
-      end: r.end,
-      label: getRegionLabel(r),
-      score: getRegionScore(r),
-      wordIndex: getRegionWordIndex(r),
-    }));
-  }, [regionsRef]);
-
-  // 通知外部（runAlignment 等）
-  const notifyChange = useCallback(() => {
-    refreshRegionsState();
-    onChange?.();
-  }, [refreshRegionsState, onChange]);
+  // 設定選取段落 (相容別名)
+  const setSelectedRegion = useCallback((s: LabSegment | null) => {
+    if (s) {
+      setSelectedSegmentId(s.id || null);
+      setSelectedSegmentIds(new Set(s.id ? [s.id] : []));
+    } else {
+      setSelectedSegmentId(null);
+      setSelectedSegmentIds(new Set());
+    }
+  }, []);
 
   // 儲存歷史紀錄
   const saveHistory = useCallback(() => {
-    if (!regionsRef.current) return;
-    const current = stringifyFromRegions(
-      regionsRef.current.getRegions().filter((r) => r.id !== 'start-pointer')
-    );
+    const currentStr = JSON.stringify(segments);
     const stack = undoStackRef.current;
-    if (stack.length > 0 && stack[stack.length - 1] === current) return;
-    undoStackRef.current = [...stack, current];
-  }, [regionsRef]);
+    if (stack.length > 0 && stack[stack.length - 1] === currentStr) return;
+    undoStackRef.current = [...stack, currentStr];
+  }, [segments]);
 
-  // 標記為已修改並儲存歷史
-  const commitChange = useCallback(() => {
-    saveHistory();
-    notifyChange();
-  }, [saveHistory, notifyChange]);
-
-  // 純粹將 segments 重新渲染到新的 RegionsPlugin 實例上，不改動歷史紀錄 (undoStack)
-  const renderSegments = useCallback(
-    (segments: LabSegment[], regions: RegionsPlugin) => {
-      isUpdatingRef.current = true;
-      regions.clearRegions();
-      segments.forEach((seg, i) => {
-        const level = i % 2;
-        const reg = regions.addRegion({
-          start: seg.start,
-          end: seg.end,
-          content: createLabelElement(seg.label, level),
-          drag: false,
-          resize: true,
-        });
-        if (reg) applyRegionStyle(reg, seg.label, level, seg.score, seg.wordIndex);
-      });
-
-      // Re-create the start pointer after clearing
-      recreateStartPointer(regions);
-
-      isUpdatingRef.current = false;
-      refreshRegionsState();
+  // 更新選中段落的標籤
+  const updateLabel = useCallback(
+    (labelOverride?: string) => {
+      if (!selectedSegmentId || selectedSegmentIds.size > 1) return;
+      const targetLabel = labelOverride !== undefined ? labelOverride : editLabel;
+      saveHistory();
+      setSegments((prev) =>
+        prev.map((s) => (s.id === selectedSegmentId ? { ...s, label: targetLabel } : s))
+      );
     },
-    [refreshRegionsState]
+    [selectedSegmentId, selectedSegmentIds, editLabel, saveHistory, setSegments]
   );
 
-  // 全新載入 labels，渲染並重設 undo stack
-  const loadRegions = useCallback(
-    (segments: LabSegment[], regions: RegionsPlugin) => {
-      renderSegments(segments, regions);
-      // 初始化 undo stack
-      undoStackRef.current = [
-        stringifyFromRegions(
-          regions.getRegions().filter((r) => r.id !== 'start-pointer')
-        ),
-      ];
+  // 更新段落的單詞對齊索引
+  const updateSegmentWordIndex = useCallback(
+    (id: string, wordIndex: number | undefined) => {
+      saveHistory();
+      setSegments((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, wordIndex } : s))
+      );
     },
-    [renderSegments]
+    [saveHistory, setSegments]
   );
 
-  // 更新選中 region 的標籤
-  const updateLabel = useCallback((labelOverride?: string) => {
-    if (selectedRegionIds.size > 1) return;
-    if (!selectedRegion || !regionsRef.current) return;
-    const label = labelOverride !== undefined ? labelOverride : editLabel;
-    const all = regionsRef.current
-      .getRegions()
-      .filter((r) => r.id !== 'start-pointer')
-      .sort((a: Region, b: Region) => a.start - b.start);
-    const idx = all.indexOf(selectedRegion);
-    const level = idx !== -1 ? idx % 2 : 0;
-    const score = getRegionScore(selectedRegion);
-    const wordIndex = getRegionWordIndex(selectedRegion);
-
-    selectedRegion.setOptions({
-      content: createLabelElement(label, level),
-    });
-    applyRegionStyle(selectedRegion, label, level, score, wordIndex);
-
-    commitChange();
-  }, [selectedRegion, selectedRegionIds, editLabel, regionsRef, commitChange]);
-
-  // 更新選中 region 的 wordIndex
-  const updateRegionWordIndex = useCallback((regionId: string, wordIndex: number | undefined) => {
-    if (!regionsRef.current) return;
-    const all = regionsRef.current.getRegions().filter((r) => r.id !== 'start-pointer');
-    const region = all.find((r) => r.id === regionId);
-    if (!region) return;
-
-    const allSorted = [...all].sort((a, b) => a.start - b.start);
-    const idx = allSorted.indexOf(region);
-    const level = idx !== -1 ? idx % 2 : 0;
-    const label = getRegionLabel(region);
-    const score = getRegionScore(region);
-
-    applyRegionStyle(region, label, level, score, wordIndex);
-
-    if (selectedRegion && selectedRegion.id === regionId) {
-      setSelectedRegion(region);
-    }
-
-    commitChange();
-  }, [regionsRef, selectedRegion, setSelectedRegion, commitChange]);
-
-  // 刪除選中的 region
+  // 刪除選中的段落，並讓前一個段落延伸補滿空隙
   const deleteSelected = useCallback(() => {
-    if (selectedRegionIds.size > 1) return;
-    if (!selectedRegion || !regionsRef.current) return;
+    if (!selectedSegmentId || selectedSegmentIds.size > 1) return;
+    saveHistory();
 
-    // 取得刪除前的排序與索引，用 id 匹配避免物件引用不一致
-    const allBefore = regionsRef.current
-      .getRegions()
-      .filter((r) => r.id !== 'start-pointer')
-      .sort((a: Region, b: Region) => a.start - b.start);
-    const idx = allBefore.findIndex((r: Region) => r.id === selectedRegion.id);
-    const deletedEnd = selectedRegion.end;
+    setSegments((prev) => {
+      const sorted = [...prev].sort((a, b) => a.start - b.start);
+      const idx = sorted.findIndex((s) => s.id === selectedSegmentId);
+      if (idx === -1) return prev;
 
-    selectedRegion.remove();
-    setSelectedRegion(null);
+      const deletedSeg = sorted[idx];
+      const filtered = sorted.filter((s) => s.id !== selectedSegmentId);
 
-    // 讓前一個 region 延伸以填補空隙（float 域共享邊界，-1 由序列化層處理）
-    if (idx > 0) {
-      allBefore[idx - 1].setOptions({ end: deletedEnd });
-    }
+      // 若刪除的不是第一個，讓前一個段落向右延伸到被刪除段落的 end
+      if (idx > 0) {
+        filtered[idx - 1] = {
+          ...filtered[idx - 1],
+          end: deletedSeg.end,
+        };
+      }
 
-    // 重新計算層級顏色
-    const newAll = regionsRef.current
-      .getRegions()
-      .filter((r) => r.id !== 'start-pointer')
-      .sort((a: Region, b: Region) => a.start - b.start);
-    newAll.forEach((r: Region, i: number) => {
-      const level = i % 2;
-      const label = getRegionLabel(r);
-      const score = getRegionScore(r);
-      const wordIndex = getRegionWordIndex(r);
-      applyRegionStyle(r, label, level, score, wordIndex);
+      return filtered;
     });
 
-    commitChange();
-  }, [selectedRegion, selectedRegionIds, regionsRef, setSelectedRegion, commitChange]);
+    setSelectedSegmentId(null);
+    setSelectedSegmentIds(new Set());
+  }, [selectedSegmentId, selectedSegmentIds, saveHistory, setSegments]);
 
-  // 在指定時間點切割 region
+  // 在特定時間點切割段落
   const splitAtTime = useCallback(
     (time: number) => {
-      if (!regionsRef.current) return;
-      const regions = regionsRef.current;
-      const all = regions
-        .getRegions()
-        .filter((r) => r.id !== 'start-pointer')
-        .sort((a: Region, b: Region) => a.start - b.start);
-      const target = all.find(
-        (r: Region) => time >= r.start && time <= r.end
-      );
-      if (!target) return;
+      saveHistory();
+      setSegments((prev) => {
+        const sorted = [...prev].sort((a, b) => a.start - b.start);
+        const targetIdx = sorted.findIndex((s) => time >= s.start && time <= s.end);
+        if (targetIdx === -1) return prev;
 
-      const oldEnd = target.end;
-      const oldLabel = getRegionLabel(target);
-      const oldScore = getRegionScore(target);
-      const oldWordIndex = getRegionWordIndex(target);
+        const target = sorted[targetIdx];
+        const oldEnd = target.end;
 
-      isUpdatingRef.current = true;
-      target.setOptions({ end: time });
-      const newReg = regions.addRegion({
-        start: time,
-        end: oldEnd,
-        content: createLabelElement(oldLabel, 0),
-        drag: false,
-        resize: true,
+        // 修改被切分段落的 end
+        sorted[targetIdx] = {
+          ...target,
+          end: time,
+        };
+
+        // 插入一個新的段落
+        const newSeg: LabSegment = {
+          id: `seg-${Math.random().toString(36).substring(2, 9)}`,
+          start: time,
+          end: oldEnd,
+          label: target.label,
+          score: target.score,
+          wordIndex: target.wordIndex,
+        };
+
+        sorted.splice(targetIdx + 1, 0, newSeg);
+        return sorted;
       });
-      if (newReg) applyRegionStyle(newReg, oldLabel, 0, oldScore, oldWordIndex);
+    },
+    [saveHistory, setSegments]
+  );
 
-      isUpdatingRef.current = false;
-
-      // 重新計算所有層級
-      const newAll = regions
-        .getRegions()
-        .filter((r) => r.id !== 'start-pointer')
-        .sort((a: Region, b: Region) => a.start - b.start);
-      newAll.forEach((r: Region, idx: number) => {
-        const level = idx % 2;
-        const label = getRegionLabel(r);
-        const score = getRegionScore(r);
-        const wordIndex = getRegionWordIndex(r);
-        applyRegionStyle(r, label, level, score, wordIndex);
+  // 處理音素片段拖曳調整 (即時計算)
+  const handleSegmentDrag = useCallback(
+    (
+      id: string,
+      newStart: number,
+      newEnd: number,
+      cachedMap: Map<string, { start: number; end: number }>
+    ) => {
+      setSegments((prev) => {
+        return updateSegmentPositionsPure(id, newStart, newEnd, prev, selectedSegmentIds, cachedMap);
       });
-
-      commitChange();
     },
-    [regionsRef, commitChange]
+    [selectedSegmentIds, setSegments]
   );
 
-  // region 拖動過程中鄰居邊界/多選同步調整
-  const handleRegionUpdate = useCallback(
-    (r: Region) => {
-      if (isUpdatingRef.current) return;
-      if (!regionsRef.current) return;
-
-      if (r.id === 'start-pointer') {
-        setStartPointerTime(r.start);
-        return;
-      }
-
-      if (!dragStartPositionsRef.current) {
-        const map = new Map<string, { start: number; end: number }>();
-        regionsRef.current.getRegions().forEach((reg) => {
-          map.set(reg.id, { start: reg.start, end: reg.end });
-        });
-        dragStartPositionsRef.current = map;
-      }
-
-      const all = regionsRef.current
-        .getRegions()
-        .filter((reg) => reg.id !== 'start-pointer')
-        .sort((a: Region, b: Region) => a.start - b.start);
-
-      isUpdatingRef.current = true;
-      updateRegionPositions(r, all, selectedRegionIds, dragStartPositionsRef.current);
-      isUpdatingRef.current = false;
+  // 處理音素片段拖曳完成 (寫入歷史)
+  const handleSegmentDragEnd = useCallback(
+    (
+      id: string,
+      newStart: number,
+      newEnd: number,
+      cachedMap: Map<string, { start: number; end: number }>
+    ) => {
+      saveHistory();
+      setSegments((prev) => {
+        return updateSegmentPositionsPure(id, newStart, newEnd, prev, selectedSegmentIds, cachedMap);
+      });
     },
-    [selectedRegionIds, regionsRef, setStartPointerTime]
+    [saveHistory, selectedSegmentIds, setSegments]
   );
 
-  // region 拖拉後鄰居邊界調整
-  const handleRegionUpdated = useCallback(
-    (r: Region) => {
-      if (isUpdatingRef.current) return;
-      if (!regionsRef.current) return;
+  // 處理點選選取段落
+  const handleSegmentClicked = useCallback(
+    (id: string, e?: MouseEvent | React.MouseEvent) => {
+      const sorted = [...segments].sort((a, b) => a.start - b.start);
+      const clickedSeg = sorted.find((s) => s.id === id);
+      if (!clickedSeg) return;
 
-      if (r.id === 'start-pointer') {
-        setStartPointerTime(r.start);
-        dragStartPositionsRef.current = null;
-        return;
-      }
-
-      handleRegionUpdate(r);
-      dragStartPositionsRef.current = null;
-      commitChange();
-    },
-    [handleRegionUpdate, commitChange, setStartPointerTime]
-  );
-
-  // region 點擊 → 選取
-  const handleRegionClicked = useCallback(
-    (r: Region, e?: MouseEvent | React.MouseEvent) => {
-      if (r.id === 'start-pointer') return;
-      if (!regionsRef.current) return;
-      const all = regionsRef.current
-        .getRegions()
-        .filter((reg) => reg.id !== 'start-pointer')
-        .sort((a: Region, b: Region) => a.start - b.start);
-
-      const shouldMultiSelect = !!(e?.shiftKey && selectedRegion);
+      const shouldMultiSelect = !!(e?.shiftKey && selectedSegmentId);
       const nextSelectedIds = shouldMultiSelect
-        ? getShiftSelectionIds(all, selectedRegion!.id, r.id)
-        : new Set([r.id]);
+        ? getShiftSelectionIds(
+            sorted.map((s) => ({ id: s.id || '', start: s.start, end: s.end } as any)),
+            selectedSegmentId!,
+            id
+          )
+        : new Set([id]);
 
       if (!shouldMultiSelect) {
-        setSelectedRegionState(r);
+        setSelectedSegmentId(id);
       }
-      setSelectedRegionIds(nextSelectedIds);
-      setEditLabel(getRegionLabel(r));
+      setSelectedSegmentIds(nextSelectedIds);
+      setEditLabel(clickedSeg.label);
     },
-    [selectedRegion, regionsRef]
+    [segments, selectedSegmentId]
   );
 
-  // 撤銷
+  // 撤銷 (Undo)
   const undo = useCallback(() => {
     const stack = undoStackRef.current;
-    if (stack.length <= 1 || !regionsRef.current) return;
+    if (stack.length <= 1) return;
 
     const newStack = [...stack];
-    newStack.pop();
-    const prevState = newStack[newStack.length - 1];
+    newStack.pop(); // 移除當前狀態
+    const prevStateStr = newStack[newStack.length - 1];
     undoStackRef.current = newStack;
 
-    // 從文字重建所有 regions
-    const segments = parseLabFromString(prevState);
-    isUpdatingRef.current = true;
-    regionsRef.current.clearRegions();
-    segments.forEach((seg, i) => {
-      const level = i % 2;
-      const reg = regionsRef.current?.addRegion({
-        start: seg.start,
-        end: seg.end,
-        content: createLabelElement(seg.label, level),
-        drag: false,
-        resize: true,
-      });
-      if (reg) applyRegionStyle(reg, seg.label, level, seg.score, seg.wordIndex);
-    });
+    const prevSegments = JSON.parse(prevStateStr) as LabSegment[];
+    setSegmentsState(prevSegments);
+    setSelectedSegmentId(null);
+    setSelectedSegmentIds(new Set());
 
-    // Re-create start pointer in undo
-    recreateStartPointer(regionsRef.current);
-
-    isUpdatingRef.current = false;
-
-    notifyChange();
-  }, [regionsRef, notifyChange]);
+    setTimeout(() => onChange?.(), 0);
+  }, [onChange]);
 
   // 取得當前 segments
   const getCurrentSegments = useCallback((): LabSegment[] => {
-    return lastSegmentsRef.current;
-  }, []);
+    return segments;
+  }, [segments]);
 
   return {
-    selectedRegion,
-    selectedRegionIds,
+    segments,
+    setSegments,
+    selectedSegmentId,
+    selectedSegment,
+    selectedRegion: selectedSegment,
+    selectedRegionIds: selectedSegmentIds,
     editLabel,
     labelsCount,
     regionItems,
     startPointerTime,
+    setSelectedSegmentId,
     setSelectedRegion,
     setEditLabel,
-    loadRegions,
-    renderSegments,
+    loadSegments,
     updateLabel,
-    updateRegionWordIndex,
+    updateSegmentWordIndex,
+    updateRegionWordIndex: updateSegmentWordIndex,
     deleteSelected,
     splitAtTime,
-    handleRegionUpdate,
-    handleRegionUpdated,
-    handleRegionClicked,
-    refreshRegionsState,
+    handleSegmentDrag,
+    handleSegmentDragEnd,
+    handleSegmentClicked,
+    handleRegionClicked: (r, e) => handleSegmentClicked(r.id, e),
     undo,
     saveHistory,
     getCurrentSegments,
     setStartPointerTime,
-    recreateStartPointer,
   };
 }
-
-

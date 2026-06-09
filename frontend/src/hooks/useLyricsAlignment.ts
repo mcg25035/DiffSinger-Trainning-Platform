@@ -1,7 +1,8 @@
 /**
- * useLyricsAlignment — 歌詞對齊 Hook
+ * useLyricsAlignment — 歌詞對齊 Hook (純資料邏輯，無副作用)
  *
- * 包裝 alignmentEngine 的純演算法，管理 wordInstances state。
+ * 設計原因：將歌詞對齊引擎與 UI 層（WaveSurfer DOM 結構）解耦，
+ * 直接對 React 的 segments state 進行對齊與更新。
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -11,26 +12,27 @@ import {
   type LabelInfo,
 } from '../utils/alignmentEngine';
 import { saveWordAlignmentMap } from '../utils/alignmentStorage';
-import { getRegionLabel, getRegionWordIndex, type ExtendedRegion } from '../utils/regionStyle';
-import type { Region } from 'wavesurfer.js/plugins/regions';
-import type RegionsPlugin from 'wavesurfer.js/plugins/regions';
+import type { LabSegment } from '../utils/labParser';
 
 export type { WordInstance } from '../utils/alignmentEngine';
 
 export interface UseLyricsAlignmentReturn {
   wordInstances: WordInstance[];
-  runAlignment: () => void;
+  runAlignment: (segmentsOverride?: LabSegment[]) => void;
 }
 
 export function useLyricsAlignment(
-  regionsRef: React.MutableRefObject<RegionsPlugin | null>,
+  segments: LabSegment[],
+  setSegments: React.Dispatch<React.SetStateAction<LabSegment[]>>,
   lyrics: string,
   filename: string
 ): UseLyricsAlignmentReturn {
   const [wordInstances, setWordInstances] = useState<WordInstance[]>([]);
   const lyricsRef = useRef(lyrics);
   const filenameRef = useRef(filename);
+  const segmentsRef = useRef(segments);
 
+  // 用 refs 保存最新資料以避免 stale closure
   useEffect(() => {
     lyricsRef.current = lyrics;
   }, [lyrics]);
@@ -39,38 +41,43 @@ export function useLyricsAlignment(
     filenameRef.current = filename;
   }, [filename]);
 
-  const runAlignment = useCallback(() => {
-    if (!regionsRef.current) return;
+  useEffect(() => {
+    segmentsRef.current = segments;
+  }, [segments]);
 
-    const allRegions = regionsRef.current
-      .getRegions()
-      .filter((r: Region) => r.id !== 'start-pointer')
-      .sort((a: Region, b: Region) => a.start - b.start);
+  const runAlignment = useCallback((segmentsOverride?: LabSegment[]) => {
+    const currentSegments = segmentsOverride || segmentsRef.current;
+    if (currentSegments.length === 0) return;
+
     const words = lyricsRef.current.split(/\s+/).filter((w: string) => w.length > 0);
 
-    const labels: LabelInfo[] = allRegions.map((r: Region) => ({
-      text: getRegionLabel(r),
-      start: r.start,
-      end: r.end,
-      wordIndex: getRegionWordIndex(r),
-    }));
+    const labels: LabelInfo[] = currentSegments
+      .sort((a, b) => a.start - b.start)
+      .map((s) => ({
+        text: s.label,
+        start: s.start,
+        end: s.end,
+        wordIndex: s.wordIndex,
+      }));
 
+    // 使用純對齊演算法計算各音素對應的單詞
     const instances = alignLyricsToLabels(words, labels);
     setWordInstances(instances);
 
-    // 將自動分配好的單詞索引寫回 region DOM 屬性，與 Region 物件屬性，以便後續儲存與快取
-    allRegions.forEach((r: Region, i: number) => {
-      const idx = labels[i].wordIndex;
-      if (idx !== undefined) {
-        const extRegion = r as ExtendedRegion;
-        extRegion.wordIndex = idx;
-        r.element?.setAttribute('data-label-word-index', idx.toString());
-      }
+    // 將計算出的 wordIndex 寫回 React 的 segments state
+    setSegments((prev) => {
+      return prev.map((s, i) => {
+        const idx = labels[i]?.wordIndex;
+        return {
+          ...s,
+          wordIndex: idx,
+        };
+      });
     });
 
-    // 儲存至 localStorage，避免修改實體 .lab 檔案
+    // 儲存對齊對照表至 localStorage
     saveWordAlignmentMap(filenameRef.current, labels);
-  }, [regionsRef]);
+  }, [setSegments]);
 
   return { wordInstances, runAlignment };
 }

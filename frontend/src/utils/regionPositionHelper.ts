@@ -9,6 +9,119 @@ interface CachedPosition {
  * 處理拖動/調整邊界時的位置同步更新
  * 支援多個音素 Start 同步拖移且間距不變，並提供邊界限制限制 (Clamping)
  */
+import type { LabSegment } from './labParser';
+
+interface CachedPosition {
+  start: number;
+  end: number;
+}
+
+/**
+ * 處理拖動/調整邊界時的位置同步更新 (純資料層計算，無副作用)
+ * 支援多個音素 Start 同步拖移且間距不變，並提供邊界限制限制 (Clamping)
+ */
+export function updateSegmentPositionsPure(
+  draggedId: string,
+  newStart: number,
+  newEnd: number,
+  segments: LabSegment[],
+  selectedSegmentIds: Set<string>,
+  cachedMap: Map<string, CachedPosition>
+): LabSegment[] {
+  const cached = cachedMap.get(draggedId);
+  if (!cached) return segments;
+
+  let delta = 0;
+  let isStartDragged = false;
+  let isEndDragged = false;
+
+  if (Math.abs(newStart - cached.start) > 0.0001) {
+    delta = newStart - cached.start;
+    isStartDragged = true;
+  } else if (Math.abs(newEnd - cached.end) > 0.0001) {
+    delta = newEnd - cached.end;
+    isEndDragged = true;
+  }
+
+  if (!isStartDragged && !isEndDragged) return segments;
+
+  // 複製一份 segments 進行修改
+  const nextSegments = segments.map((s) => ({ ...s }));
+
+  const isMultiple = selectedSegmentIds.size > 1;
+  let isSelectedStartDragged = false;
+
+  if (isMultiple) {
+    if (isStartDragged) {
+      isSelectedStartDragged = selectedSegmentIds.has(draggedId);
+    } else if (isEndDragged) {
+      const idx = nextSegments.findIndex((s) => s.id === draggedId);
+      if (idx !== -1 && idx < nextSegments.length - 1) {
+        const nextSeg = nextSegments[idx + 1];
+        isSelectedStartDragged = selectedSegmentIds.has(nextSeg.id!);
+      }
+    }
+  }
+
+  if (isMultiple && isSelectedStartDragged) {
+    const selectedSegs = nextSegments.filter((s) => selectedSegmentIds.has(s.id!));
+    if (selectedSegs.length > 0) {
+      const firstSelected = selectedSegs[0];
+      const lastSelected = selectedSegs[selectedSegs.length - 1];
+
+      const firstCached = cachedMap.get(firstSelected.id!);
+      const lastCached = cachedMap.get(lastSelected.id!);
+
+      if (firstCached && lastCached) {
+        let minDelta = -Infinity;
+        const firstIdx = nextSegments.findIndex((s) => s.id === firstSelected.id);
+        if (firstIdx > 0) {
+          const prevSeg = nextSegments[firstIdx - 1];
+          const prevCached = cachedMap.get(prevSeg.id!);
+          if (prevCached) {
+            minDelta = prevCached.start + 0.01 - firstCached.start;
+          }
+        }
+
+        const maxDelta = lastCached.end - 0.01 - lastCached.start;
+        delta = Math.max(minDelta, Math.min(maxDelta, delta));
+
+        selectedSegs.forEach((seg) => {
+          const c = cachedMap.get(seg.id!);
+          if (c) {
+            seg.start = c.start + delta;
+            if (seg.id !== lastSelected.id) {
+              seg.end = c.end + delta;
+            }
+          }
+        });
+
+        if (firstIdx > 0) {
+          const prevSeg = nextSegments[firstIdx - 1];
+          const prevCached = cachedMap.get(prevSeg.id!);
+          if (prevCached) {
+            prevSeg.end = firstCached.start + delta;
+          }
+        }
+
+        lastSelected.end = lastCached.end;
+      }
+    }
+  } else {
+    // 單一 Region 拖曳，前後相鄰 Region 共享邊界
+    const i = nextSegments.findIndex((s) => s.id === draggedId);
+    if (i !== -1) {
+      const seg = nextSegments[i];
+      seg.start = newStart;
+      seg.end = newEnd;
+      if (i < nextSegments.length - 1) nextSegments[i + 1].start = newEnd;
+      if (i > 0) nextSegments[i - 1].end = newStart;
+    }
+  }
+
+  return nextSegments;
+}
+
 export function updateRegionPositions(
   r: Region,
   all: Region[],

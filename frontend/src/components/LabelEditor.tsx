@@ -1,20 +1,10 @@
 /**
- * LabelEditor — Visual Labeler 主組件（重構後）
+ * LabelEditor — Visual Labeler 主組件 (重構後)
  *
- * 此組件現在僅作為**組合層**，整合以下模組：
- *
- * Hooks:
- *  - useWaveSurfer: 顯示層（WaveSurfer + Spectrogram + Regions）
- *  - useAudioPlayback: 播放層（Crunker + HTMLAudioElement）
- *  - useRegionManager: Region CRUD + Undo
- *  - useLyricsAlignment: 歌詞 ⇄ 音素對齊
- *  - useLabelPersistence: 存檔 / 載入 API
- *  - useKeyboardShortcuts: 快捷鍵
- *
- * Sub-components:
- *  - LabelToolbar: 工具列
- *  - PhonemeEditPanel: 音素編輯面板
- *  - RegionButtonTrack: Region 按鈕列表
+ * 此組件現在作為**組合與同步層**：
+ *  - 負責初始化所有資料/播放 hooks。
+ *  - 提供一個單向的同步 Effect，負責將 React 的 segments state 繪製到 WaveSurfer 畫面上。
+ *  - 將 WaveSurfer 的操作（如雙擊切割、右鍵設定播放起點、拖曳 Region 等）轉換為對 React state 的更新。
  */
 
 import { useRef, useState, useEffect, useCallback } from 'react';
@@ -25,7 +15,12 @@ import { useRegionManager } from '../hooks/useRegionManager';
 import { useLyricsAlignment } from '../hooks/useLyricsAlignment';
 import { useLabelPersistence } from '../hooks/useLabelPersistence';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { getRegionLabel } from '../utils/regionStyle';
+import {
+  getRegionLabel,
+  getRegionWordIndex,
+  createLabelElement,
+  applyRegionStyle,
+} from '../utils/regionStyle';
 import { loadWordAlignmentMap } from '../utils/alignmentStorage';
 import { focusAndSelectAll } from '../utils/domUtils';
 import { LabelToolbar } from './label-editor/LabelToolbar';
@@ -34,6 +29,7 @@ import { RegionButtonTrack } from './label-editor/RegionButtonTrack';
 import { LyricsDisplay } from './label-editor/LyricsDisplay';
 import './label-editor/LabelEditor.css';
 import type { Region } from 'wavesurfer.js/plugins/regions';
+import type { LabSegment } from '../utils/labParser';
 
 interface Props {
   recording: Recording;
@@ -44,7 +40,14 @@ interface Props {
   onFullscreenChange?: (fs: boolean) => void;
 }
 
-export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscreen: isFullscreenProp = false, onFullscreenChange }: Props) {
+export function LabelEditor({
+  recording,
+  onCancel,
+  onNext,
+  onPrevious,
+  isFullscreen: isFullscreenProp = false,
+  onFullscreenChange,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const waveformContainerRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -53,37 +56,38 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
   const isFullscreen = onFullscreenChange ? isFullscreenProp : isFullscreenLocal;
   const setIsFullscreen = onFullscreenChange ?? setIsFullscreenLocal;
   const [containerHeight, setContainerHeight] = useState<number>(0);
-  
+
   const savedTimeRef = useRef<number>(0);
-  const savedSelectionTimeRef = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lyrics = recording.lyrics || '';
   const lastUrlRef = useRef<string>('');
 
-  // Track the actual height of the waveform container
+  // 用於在拖曳時保存起始狀態
+  const dragStartPositionsRef = useRef<Map<string, { start: number; end: number }> | null>(null);
+  // 用於防範 React 同步與 WaveSurfer 事件觸發的遞迴更新
+  const isSyncingRef = useRef(false);
+
+  // 測量波形容器的高度（視窗 resize 與全螢幕切換時）
   useEffect(() => {
-    const el = waveformContainerRef.current;
-    if (!el) return;
-
-    const observer = new ResizeObserver(() => {
-      // 使用 offsetHeight 代替 clientHeight，以避免因為水平捲軸出現/消失而減少 clientHeight，
-      // 從而引發 ResizeObserver 與 React state 更新的無限銷毀/重構迴圈。
-      const height = el.offsetHeight;
-      if (height > 0) {
-        setContainerHeight((prev) => {
-          // 避免微小的版面晃動（例如播放時按鈕框線微調或捲軸出現）導致 wavesurfer 被銷毀重構。
-          // 僅在高度變化大於 10px 時（如切換全螢幕或視窗縮放）才更新高度。
-          if (prev === 0 || Math.abs(height - prev) > 10) {
-            return height;
-          }
-          return prev;
-        });
+    const handleResize = () => {
+      const el = waveformContainerRef.current;
+      if (el) {
+        const height = el.offsetHeight;
+        if (height > 0) {
+          setContainerHeight((prev) => {
+            if (prev === 0 || Math.abs(height - prev) > 10) {
+              return height;
+            }
+            return prev;
+          });
+        }
       }
-    });
+    };
 
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isFullscreen]);
 
   const defaultHeight = isFullscreen ? 800 : 280;
   const actualHeight = containerHeight > 0 ? containerHeight : defaultHeight;
@@ -98,16 +102,36 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
     spectrogramHeight = 100;
   }
 
-  // ── 顯示層：WaveSurfer (靜音) ──
+  // ── 存檔 / 載入 Hook ──
+  const persistence = useLabelPersistence(recording);
+
+  // ── Region/Segments 資料狀態管理 Hook ──
+  const regionMgr = useRegionManager(() => {
+    // 當 segments 有任何修改時：
+    alignment.runAlignment();
+    persistence.setIsDirty(true);
+    persistence.setSaveStatus('idle');
+    // 自動存檔
+    persistence.triggerAutoSave(() => regionMgr.getCurrentSegments());
+  });
+
+  // ── 歌詞對齊 Hook ──
+  const alignment = useLyricsAlignment(
+    regionMgr.segments,
+    regionMgr.setSegments,
+    lyrics,
+    recording.filename
+  );
+
+  // ── 顯示層：WaveSurfer ──
   const wavesurfer = useWaveSurfer({
     containerRef,
     url: recording.url,
     waveformHeight,
     spectrogramHeight,
-    onReady: (ws, regions) => {
+    onReady: (ws, _regions) => {
       const duration = ws.getDuration();
 
-      // Track last url to only reset start pointer when loading a new file
       const isNewFile = lastUrlRef.current !== recording.url;
       lastUrlRef.current = recording.url;
 
@@ -115,72 +139,69 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
         regionMgr.setStartPointerTime(0);
       }
 
-      // Listen to timeupdate to save time
       ws.on('timeupdate', (time) => {
         savedTimeRef.current = time;
       });
 
       const currentSegments = regionMgr.getCurrentSegments();
 
-      // 如果當前 React state 中已有編輯中的 segments，我們直接載入，不讀取 API，以保持未存檔進度與 undoStack
+      // 若目前已有暫存資料，直接使用它重新對齊
       if (currentSegments.length > 0) {
         loadWordAlignmentMap(recording.filename, currentSegments);
-        regionMgr.renderSegments(currentSegments, regions);
-        alignment.runAlignment();
-        regionMgr.refreshRegionsState();
+        alignment.runAlignment(currentSegments);
       } else {
         // 第一次載入，自 API 讀取
-        persistence.loadLabels(duration).then((segments) => {
+        persistence.loadLabels(duration).then((loaded) => {
           if (wavesurfer.wavesurferRef.current !== ws) return;
-          if (segments.length > 0) {
-            loadWordAlignmentMap(recording.filename, segments);
-            regionMgr.loadRegions(segments, regions);
-            alignment.runAlignment();
-            regionMgr.refreshRegionsState();
+          if (loaded.length > 0) {
+            loadWordAlignmentMap(recording.filename, loaded);
+            regionMgr.loadSegments(loaded);
+            alignment.runAlignment(loaded);
           } else {
-            // No segments loaded. Make sure we still add the start pointer!
-            regionMgr.recreateStartPointer(regions, 0);
-            regionMgr.refreshRegionsState();
+            regionMgr.loadSegments([]);
           }
         });
       }
 
-      // 恢復播放指標位置
       if (savedTimeRef.current > 0) {
         ws.setTime(savedTimeRef.current);
       }
-
-      // 恢復選取狀態
-      if (savedSelectionTimeRef.current !== null) {
-        const found = regions.getRegions().filter((r) => r.id !== 'start-pointer').find(
-          (r: Region) =>
-            savedSelectionTimeRef.current! >= r.start &&
-            savedSelectionTimeRef.current! <= r.end
-        );
-        if (found) {
-          regionMgr.setSelectedRegion(found);
-          regionMgr.setEditLabel(getRegionLabel(found));
-        }
-      }
     },
     onRegionUpdate: (region) => {
-      regionMgr.handleRegionUpdate(region);
+      if (isSyncingRef.current) return;
+      if (region.id === 'start-pointer') {
+        regionMgr.setStartPointerTime(region.start);
+      } else {
+        if (!dragStartPositionsRef.current) {
+          const map = new Map<string, { start: number; end: number }>();
+          regionMgr.segments.forEach((s) => {
+            if (s.id) map.set(s.id, { start: s.start, end: s.end });
+          });
+          dragStartPositionsRef.current = map;
+        }
+        regionMgr.handleSegmentDrag(region.id, region.start, region.end, dragStartPositionsRef.current);
+      }
     },
     onRegionUpdated: (region) => {
-      regionMgr.handleRegionUpdated(region);
+      if (isSyncingRef.current) return;
+      if (region.id === 'start-pointer') {
+        regionMgr.setStartPointerTime(region.start);
+      } else {
+        if (dragStartPositionsRef.current) {
+          regionMgr.handleSegmentDragEnd(region.id, region.start, region.end, dragStartPositionsRef.current);
+        }
+      }
+      dragStartPositionsRef.current = null;
     },
     onRegionClicked: (region, e) => {
-      regionMgr.handleRegionClicked(region, e);
+      if (region.id === 'start-pointer') return;
+      regionMgr.handleSegmentClicked(region.id, e);
     },
     onDblClick: (time) => {
       regionMgr.splitAtTime(time);
     },
     onRightClick: (time) => {
-      // 右鍵點擊：將黃色 start pointer 移到點擊位置
-      const regions = wavesurfer.regionsRef.current;
-      if (!regions) return;
       regionMgr.setStartPointerTime(time);
-      regionMgr.recreateStartPointer(regions, time);
     },
   });
 
@@ -197,44 +218,109 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
 
       setActivePlayRange(null);
       const ws = wavesurfer.wavesurferRef.current;
-      if (ws && regionMgr.selectedRegion) {
-        ws.setTime(regionMgr.selectedRegion.start);
+      if (ws && regionMgr.selectedSegment) {
+        ws.setTime(regionMgr.selectedSegment.start);
       }
     },
   });
 
-  const handlePlayRange = useCallback((start: number, end: number) => {
-    setActivePlayRange({ start, end });
-    audio.playRange(start, end);
-  }, [audio]);
+  const handlePlayRange = useCallback(
+    (start: number, end: number) => {
+      setActivePlayRange({ start, end });
+      audio.playRange(start, end);
+    },
+    [audio]
+  );
 
-  // ── Region 管理 ──
-  const regionMgr = useRegionManager(wavesurfer.regionsRef, () => {
-    // onChange callback: region 變更後重新對齊
-    alignment.runAlignment();
-    regionMgr.refreshRegionsState();
-    persistence.setIsDirty(true);
-    persistence.setSaveStatus('idle');
-    // autosave: 每次改動後 debounce 800ms 自動存檔
-    persistence.triggerAutoSave(() => regionMgr.getCurrentSegments());
-  });
-
-  // 讓 savedSelectionTimeRef 永遠與 regionMgr.selectedRegion 同步
+  // ── 單向資料流同步：React State ➔ WaveSurfer Regions ──
   useEffect(() => {
-    if (regionMgr.selectedRegion) {
-      savedSelectionTimeRef.current = (regionMgr.selectedRegion.start + regionMgr.selectedRegion.end) / 2;
+    const ws = wavesurfer.wavesurferRef.current;
+    const regions = wavesurfer.regionsRef.current;
+    if (!ws || !regions || !wavesurfer.isLoaded) return;
+
+    const wsRegions = regions.getRegions().filter((r) => r.id !== 'start-pointer');
+    const wsRegionsMap = new Map(wsRegions.map((r) => [r.id, r]));
+    const segmentsMap = new Map(regionMgr.segments.map((s) => [s.id, s]));
+
+    isSyncingRef.current = true;
+
+    // 1. 移除已被刪除的段落
+    wsRegions.forEach((r) => {
+      if (!segmentsMap.has(r.id)) {
+        r.remove();
+      }
+    });
+
+    // 2. 新增或更新段落
+    regionMgr.segments.forEach((seg, i) => {
+      const level = i % 2;
+      const existing = wsRegionsMap.get(seg.id || '');
+
+      if (existing) {
+        const currentLabel = getRegionLabel(existing);
+        const currentWordIndex = getRegionWordIndex(existing);
+
+        const timeChanged =
+          Math.abs(existing.start - seg.start) > 0.001 ||
+          Math.abs(existing.end - seg.end) > 0.001;
+        const labelChanged = currentLabel !== seg.label;
+        const wordIndexChanged = currentWordIndex !== seg.wordIndex;
+
+        if (timeChanged || labelChanged || wordIndexChanged) {
+          existing.setOptions({
+            start: seg.start,
+            end: seg.end,
+            content: labelChanged ? createLabelElement(seg.label, level) : existing.content,
+          });
+          if (labelChanged || wordIndexChanged) {
+            applyRegionStyle(existing, seg.label, level, seg.score, seg.wordIndex);
+          }
+        }
+      } else if (seg.id) {
+        const reg = regions.addRegion({
+          id: seg.id,
+          start: seg.start,
+          end: seg.end,
+          content: createLabelElement(seg.label, level),
+          drag: false,
+          resize: true,
+        });
+        if (reg) {
+          applyRegionStyle(reg, seg.label, level, seg.score, seg.wordIndex);
+        }
+      }
+    });
+
+    isSyncingRef.current = false;
+  }, [regionMgr.segments, wavesurfer.isLoaded, wavesurfer.wavesurferRef, wavesurfer.regionsRef]);
+
+  // ── 單向資料流同步：React State ➔ WaveSurfer Start Pointer ──
+  useEffect(() => {
+    const ws = wavesurfer.wavesurferRef.current;
+    const regions = wavesurfer.regionsRef.current;
+    if (!ws || !regions || !wavesurfer.isLoaded) return;
+
+    const existing = regions.getRegions().find((r) => r.id === 'start-pointer');
+    if (existing) {
+      if (Math.abs(existing.start - regionMgr.startPointerTime) > 0.001) {
+        existing.setOptions({
+          start: regionMgr.startPointerTime,
+          end: regionMgr.startPointerTime + 0.05,
+        });
+      }
     } else {
-      savedSelectionTimeRef.current = null;
+      regions.addRegion({
+        id: 'start-pointer',
+        start: regionMgr.startPointerTime,
+        end: regionMgr.startPointerTime + 0.05,
+        drag: true,
+        resize: false,
+        color: 'transparent',
+      });
     }
-  }, [regionMgr.selectedRegion]);
+  }, [regionMgr.startPointerTime, wavesurfer.isLoaded, wavesurfer.wavesurferRef, wavesurfer.regionsRef]);
 
-  // ── 歌詞對齊 ──
-  const alignment = useLyricsAlignment(wavesurfer.regionsRef, lyrics, recording.filename);
-
-  // ── 存檔 / 載入 ──
-  const persistence = useLabelPersistence(recording);
-
-  // ── 選中箭頭與開始指標顯示 ──
+  // ── 選取標示：添加箭頭效果 ──
   useEffect(() => {
     if (!wavesurfer.regionsRef.current) return;
     const all = wavesurfer.regionsRef.current.getRegions();
@@ -247,89 +333,48 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
         if (!arrow) {
           arrow = document.createElement('div');
           arrow.className = 'region-selected-arrow';
-          arrow.innerHTML = '⬇';
-          arrow.style.position = 'absolute';
-          arrow.style.top = '-20px';
-          arrow.style.left = '50%';
-          arrow.style.transform = 'translateX(-50%)';
-          arrow.style.color = '#00e5ff';
-          arrow.style.fontSize = '24px';
-          arrow.style.textShadow = '0 2px 4px rgba(0,0,0,0.8)';
-          arrow.style.pointerEvents = 'none';
-          arrow.style.zIndex = '100';
+          arrow.innerHTML = '▼';
           r.element.appendChild(arrow);
-          r.element.style.backgroundColor = 'rgba(0, 229, 255, 0.3)';
         }
-      } else {
-        if (arrow) {
-          r.element.removeChild(arrow);
-          const label = getRegionLabel(r);
-          const isWarning = label === '!';
-          const idx = phonemes.indexOf(r);
-          const level = idx !== -1 ? idx % 2 : 0;
-          r.element.style.backgroundColor = isWarning
-            ? 'rgba(255, 0, 0, 0.2)'
-            : level === 0
-              ? 'rgba(0, 229, 255, 0.15)'
-              : 'rgba(0, 229, 255, 0.05)';
-        }
+        arrow.style.display = 'block';
+      } else if (arrow) {
+        arrow.style.display = 'none';
       }
     });
   }, [regionMgr.selectedRegionIds, regionMgr.regionItems, wavesurfer.isLoaded]);
 
-  // ── save status 自動清除 ──
-  useEffect(() => {
-    if (persistence.saveStatus === 'saved') {
-      const timer = setTimeout(() => persistence.setSaveStatus('idle'), 10000);
-      return () => clearTimeout(timer);
-    }
-  }, [persistence.saveStatus]);
-
-  // ── labels 載入後重新對齊 ──
-  useEffect(() => {
-    if (wavesurfer.isLoaded) {
-      alignment.runAlignment();
-      regionMgr.refreshRegionsState();
-    }
-  }, [wavesurfer.isLoaded, regionMgr.labelsCount]);
-
-  // ── 播放防抖鎖定 Ref ──
-  const lastPlaybackRef = useRef<{ start: number; end: number; timestamp: number } | null>(null);
-  const lastWordPlaybackRef = useRef<{ start: number; end: number; timestamp: number } | null>(null);
-
-  // ── 播放 handlers ──
+  // ── 播放與選擇控制邏輯 ──
   const handlePhonemePlay = useCallback(() => {
     if (regionMgr.selectedRegionIds.size > 1) return;
     const ws = wavesurfer.wavesurferRef.current;
-    const regions = wavesurfer.regionsRef.current;
-    if (!ws || !regions) return;
+    if (!ws) return;
 
     const time = ws.getCurrentTime();
     const eps = 0.01;
-    const all = regions.getRegions().filter((r) => r.id !== 'start-pointer').sort((a: Region, b: Region) => a.start - b.start);
+    const all = [...regionMgr.segments].sort((a, b) => a.start - b.start);
     if (all.length === 0) return;
 
-    let target: Region | undefined;
+    let target: LabSegment | undefined;
     const now = Date.now();
     const lastPlayback = lastPlaybackRef.current;
 
-    // ── 播放中或剛播放完的容差鎖定（防抖） ──
+    // 播放防抖
     if (
       lastPlayback &&
       (audio.isPlayingRef.current || now - lastPlayback.timestamp < (lastPlayback.end - lastPlayback.start) * 1000 + 500)
     ) {
       if (time >= lastPlayback.start && time <= lastPlayback.end + 0.05) {
         target = all.find(
-          (r: Region) =>
-            Math.abs(r.start - lastPlayback.start) < 0.001 &&
-            Math.abs(r.end - lastPlayback.end) < 0.001
+          (s) =>
+            Math.abs(s.start - lastPlayback.start) < 0.001 &&
+            Math.abs(s.end - lastPlayback.end) < 0.001
         );
       }
     }
 
     if (!target) {
-      target = all.find((r: Region) => time >= r.start && time < r.end);
-      if (!target) target = all.find((r: Region) => time >= r.start && time <= r.end);
+      target = all.find((s) => time >= s.start && time < s.end);
+      if (!target) target = all.find((s) => time >= s.start && time <= s.end);
       if (!target && time < eps) target = all[0];
     }
 
@@ -337,7 +382,7 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
       lastPlaybackRef.current = { start: target.start, end: target.end, timestamp: Date.now() };
       handlePlayRange(target.start, target.end);
     }
-  }, [audio, wavesurfer.wavesurferRef, wavesurfer.regionsRef, handlePlayRange, regionMgr.selectedRegionIds]);
+  }, [audio, wavesurfer.wavesurferRef, regionMgr.segments, regionMgr.selectedRegionIds, handlePlayRange]);
 
   const handleWordPlay = useCallback(() => {
     if (regionMgr.selectedRegionIds.size > 1) return;
@@ -351,7 +396,7 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
     const now = Date.now();
     const lastWordPlayback = lastWordPlaybackRef.current;
 
-    // ── 播放中或剛播放完的容差鎖定（防抖） ──
+    // 播放防抖
     if (
       lastWordPlayback &&
       (audio.isPlayingRef.current || now - lastWordPlayback.timestamp < (lastWordPlayback.end - lastWordPlayback.start) * 1000 + 500)
@@ -375,7 +420,7 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
       lastWordPlaybackRef.current = { start: word.start, end: word.end, timestamp: Date.now() };
       handlePlayRange(word.start, word.end);
     }
-  }, [audio, wavesurfer.wavesurferRef, alignment, handlePlayRange, regionMgr.selectedRegionIds]);
+  }, [audio, wavesurfer.wavesurferRef, alignment, regionMgr.selectedRegionIds, handlePlayRange]);
 
   const handleFullPlay = useCallback(() => {
     if (regionMgr.selectedRegionIds.size > 1) return;
@@ -413,79 +458,67 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
   }, [persistence.isDirty, onCancel]);
 
   const handleToggleFullscreen = useCallback(() => {
-    // 播放中禁止切換全螢幕
     if (audio.isPlayingRef.current) return;
 
     const ws = wavesurfer.wavesurferRef.current;
     if (ws) {
       savedTimeRef.current = ws.getCurrentTime();
     }
-    savedSelectionTimeRef.current = regionMgr.selectedRegion
-      ? (regionMgr.selectedRegion.start + regionMgr.selectedRegion.end) / 2
-      : null;
 
     setIsFullscreen(!isFullscreen);
-  }, [wavesurfer.wavesurferRef, regionMgr.selectedRegion, audio.isPlayingRef, isFullscreen, setIsFullscreen]);
+  }, [wavesurfer.wavesurferRef, audio.isPlayingRef, isFullscreen, setIsFullscreen]);
 
   const handleSelectPrevPhoneme = useCallback(() => {
     const ws = wavesurfer.wavesurferRef.current;
-    const regions = wavesurfer.regionsRef.current;
-    if (!ws || !regions || !regionMgr.selectedRegion) return;
+    if (!ws || !regionMgr.selectedSegment) return;
 
-    const all = regions
-      .getRegions()
-      .filter((r) => r.id !== 'start-pointer')
-      .sort((a: Region, b: Region) => a.start - b.start);
-    
-    const idx = all.findIndex((r) => r.id === regionMgr.selectedRegion!.id);
+    const all = [...regionMgr.segments].sort((a, b) => a.start - b.start);
+    const idx = all.findIndex((s) => s.id === regionMgr.selectedSegment!.id);
     if (idx > 0) {
-      const prevRegion = all[idx - 1];
-      regionMgr.setSelectedRegion(prevRegion);
-      regionMgr.setEditLabel(getRegionLabel(prevRegion));
+      const prevSeg = all[idx - 1];
+      regionMgr.setSelectedRegion(prevSeg);
+      regionMgr.setEditLabel(prevSeg.label);
 
-      // 捲動到該 region 的位置
+      // 捲動畫面到該位置
       const duration = ws.getDuration();
       if (duration > 0) {
-        const center = (prevRegion.start + prevRegion.end) / 2;
+        const center = (prevSeg.start + prevSeg.end) / 2;
         const wrapper = ws.getWrapper();
         const scrollWidth = wrapper.scrollWidth;
         const clientWidth = wrapper.clientWidth;
-        const targetScroll =
-          (center / duration) * scrollWidth - clientWidth / 2;
+        const targetScroll = (center / duration) * scrollWidth - clientWidth / 2;
         wrapper.scrollTo({ left: targetScroll, behavior: 'smooth' });
       }
     }
-  }, [wavesurfer.wavesurferRef, wavesurfer.regionsRef, regionMgr]);
+  }, [wavesurfer.wavesurferRef, regionMgr]);
 
   const handleSelectNextPhoneme = useCallback(() => {
     const ws = wavesurfer.wavesurferRef.current;
-    const regions = wavesurfer.regionsRef.current;
-    if (!ws || !regions || !regionMgr.selectedRegion) return;
+    if (!ws || !regionMgr.selectedSegment) return;
 
-    const all = regions
-      .getRegions()
-      .filter((r) => r.id !== 'start-pointer')
-      .sort((a: Region, b: Region) => a.start - b.start);
-    
-    const idx = all.findIndex((r) => r.id === regionMgr.selectedRegion!.id);
+    const all = [...regionMgr.segments].sort((a, b) => a.start - b.start);
+    const idx = all.findIndex((s) => s.id === regionMgr.selectedSegment!.id);
     if (idx !== -1 && idx < all.length - 1) {
-      const nextRegion = all[idx + 1];
-      regionMgr.setSelectedRegion(nextRegion);
-      regionMgr.setEditLabel(getRegionLabel(nextRegion));
+      const nextSeg = all[idx + 1];
+      regionMgr.setSelectedRegion(nextSeg);
+      regionMgr.setEditLabel(nextSeg.label);
 
-      // 捲動到該 region 的位置
+      // 捲動畫面到該位置
       const duration = ws.getDuration();
       if (duration > 0) {
-        const center = (nextRegion.start + nextRegion.end) / 2;
+        const center = (nextSeg.start + nextSeg.end) / 2;
         const wrapper = ws.getWrapper();
         const scrollWidth = wrapper.scrollWidth;
         const clientWidth = wrapper.clientWidth;
-        const targetScroll =
-          (center / duration) * scrollWidth - clientWidth / 2;
+        const targetScroll = (center / duration) * scrollWidth - clientWidth / 2;
         wrapper.scrollTo({ left: targetScroll, behavior: 'smooth' });
       }
     }
-  }, [wavesurfer.wavesurferRef, wavesurfer.regionsRef, regionMgr]);
+  }, [wavesurfer.wavesurferRef, regionMgr]);
+
+  // ── 播放狀態追蹤 Refs ──
+  const lastPlaybackRef = useRef<{ start: number; end: number; timestamp: number } | null>(null);
+  const lastWordPlaybackRef = useRef<{ start: number; end: number; timestamp: number } | null>(null);
 
   // ── 快捷鍵 ──
   useKeyboardShortcuts({
@@ -501,14 +534,13 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
     onArrowLeft: handleSelectPrevPhoneme,
     onArrowRight: handleSelectNextPhoneme,
     onQuickReplace: (replacement) => {
-      if (regionMgr.selectedRegion && regionMgr.editLabel === '!') {
+      if (regionMgr.selectedSegment && regionMgr.editLabel === '!') {
         regionMgr.setEditLabel(replacement);
         regionMgr.updateLabel(replacement);
       }
     },
   });
 
-  // ── 渲染 ──
   return (
     <div className={`label-editor ${isFullscreen ? 'label-editor--fullscreen' : ''}`}>
       <LabelToolbar
@@ -550,16 +582,16 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
           <div className="label-editor__bottom">
             <PhonemeEditPanel
               inputRef={inputRef}
-              selectedRegion={regionMgr.selectedRegion}
+              selectedRegion={regionMgr.selectedSegment}
               isMultipleSelect={regionMgr.selectedRegionIds.size > 1}
               editLabel={regionMgr.editLabel}
               onEditLabelChange={regionMgr.setEditLabel}
               onUpdate={regionMgr.updateLabel}
               onPlay={() => {
-                if (regionMgr.selectedRegion) {
+                if (regionMgr.selectedSegment) {
                   handlePlayRange(
-                    regionMgr.selectedRegion.start,
-                    regionMgr.selectedRegion.end
+                    regionMgr.selectedSegment.start,
+                    regionMgr.selectedSegment.end
                   );
                 }
               }}
@@ -572,11 +604,11 @@ export function LabelEditor({ recording, onCancel, onNext, onPrevious, isFullscr
               selectedIds={regionMgr.selectedRegionIds}
               activePlayRange={activePlayRange}
               onSelect={(item, e) => {
-                regionMgr.handleRegionClicked(item.region, e);
+                regionMgr.handleSegmentClicked(item.id, e);
               }}
               wavesurferRef={wavesurfer.wavesurferRef}
               lyrics={lyrics}
-              onWordIndexChange={regionMgr.updateRegionWordIndex}
+              onWordIndexChange={regionMgr.updateSegmentWordIndex}
             />
           </div>
         </div>
