@@ -229,7 +229,7 @@ def run_training_loop(epochs: int, lr: float):
                     wf = item["waveform"].unsqueeze(0).to(device)
                     targets = item["targets"].unsqueeze(0).to(device)
                     
-                    with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16):
+                    with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16 if "cuda" in str(device) else torch.bfloat16):
                         emissions, _ = model(wf)
                         log_probs = torch.nn.functional.log_softmax(emissions, dim=-1)
                     
@@ -321,7 +321,7 @@ def align_audio_to_phonemes(waveform: torch.Tensor, sr: int, phonemes: List[str]
         model.eval()
         torch.cuda.empty_cache()
         with torch.inference_mode():
-            with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16):
+            with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16 if "cuda" in str(device) else torch.bfloat16):
                 emissions, _ = model(waveform)
             
         if training_head_backup is not None:
