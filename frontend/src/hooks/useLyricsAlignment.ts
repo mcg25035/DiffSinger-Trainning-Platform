@@ -65,15 +65,21 @@ export function useLyricsAlignment(
     setWordInstances(instances);
 
     // 將計算出的 wordIndex 寫回 React 的 segments state
-    setSegments((prev) => {
-      return prev.map((s, i) => {
-        const idx = labels[i]?.wordIndex;
-        return {
-          ...s,
-          wordIndex: idx,
-        };
+    // ⚠️ 重要：只在 wordIndex 真正改變時才呼叫 setSegments，
+    //    避免 setSegments → onChange → runAlignment → setSegments 無限迴圈。
+    const sorted = [...currentSegments].sort((a, b) => a.start - b.start);
+    const hasChanged = sorted.some((s, i) => s.wordIndex !== labels[i]?.wordIndex);
+    if (hasChanged) {
+      setSegments((prev) => {
+        return prev.map((s, i) => {
+          const idx = labels[i]?.wordIndex;
+          return {
+            ...s,
+            wordIndex: idx,
+          };
+        });
       });
-    });
+    }
 
     // 儲存對齊對照表至 localStorage
     saveWordAlignmentMap(filenameRef.current, labels);
