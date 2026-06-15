@@ -24,3 +24,5 @@ dev.log
 *.zip
 *.pth
 *.tar.gz
+*.pending
+exp-20260611/

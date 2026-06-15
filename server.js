@@ -85,11 +85,13 @@ async function processMfaQueue() {
     const aligner = firstTask.aligner || 'mfa';
     const dictionaryId = firstTask.dictionaryId;
     
-    // Take all current tasks with same aligner and dictionaryId as a batch
-    const batch = mfaQueue.filter(t => 
+    // Take at most 10 tasks with same aligner and dictionaryId as a batch to prevent CUDA OOM or timeouts
+    const matchingTasks = mfaQueue.filter(t => 
         (t.aligner || 'mfa') === aligner && 
         t.dictionaryId === dictionaryId
     );
+    const maxBatchSize = 10;
+    const batch = matchingTasks.slice(0, maxBatchSize);
     mfaQueue = mfaQueue.filter(t => !batch.includes(t));
     
     console.log(`[ALIGN-QUEUE] Processing batch of ${batch.length} files using aligner: ${aligner}`);

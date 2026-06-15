@@ -78,19 +78,27 @@ training_state = {
     "error_message": None
 }
 
+stable_head_state_dict = None
+
 def load_latest_weights():
     """Load latest fine-tuned weights if available, protecting model weights update with a lock."""
+    global stable_head_state_dict
     with model_lock:
         if MODEL_WEIGHTS_PATH.exists():
             try:
-                state_dict = torch.load(MODEL_WEIGHTS_PATH, map_location=device)
-                model.model.aux.load_state_dict(state_dict)
+                # Load on CPU first to avoid VRAM allocation spikes
+                state_dict = torch.load(MODEL_WEIGHTS_PATH, map_location="cpu")
+                model.model.aux.load_state_dict({k: v.to(device) for k, v in state_dict.items()})
+                stable_head_state_dict = state_dict
                 logger.info("Successfully loaded latest fine-tuned weights.")
                 return True
             except Exception as e:
                 logger.error(f"Failed to load fine-tuned weights: {e}")
-        else:
-            logger.info("No fine-tuned weights found. Operating with base pre-trained model.")
+        
+        # Fallback to base weights
+        model.model.aux.load_state_dict({k: v.to(device) for k, v in base_head_state_dict.items()})
+        stable_head_state_dict = {k: v.cpu().clone() for k, v in base_head_state_dict.items()}
+        logger.info("No fine-tuned weights found. Operating with base pre-trained model.")
         return False
 
 # Initial weights load
@@ -251,6 +259,11 @@ def run_training_loop(epochs: int, lr: float):
                     torch.nn.utils.clip_grad_norm_(model.model.aux.parameters(), max_norm=1.0)
                     optimizer.step()
                     epoch_loss += loss.item()
+                    
+                    # Explicitly delete GPU tensors to free memory immediately
+                    del wf, targets, emissions, log_probs, input_lengths, target_lengths, loss
+                    if "cuda" in str(device):
+                        torch.cuda.empty_cache()
                 
                 # Yield GIL to allow Uvicorn to handle status / health requests
                 time.sleep(0.01)
@@ -290,8 +303,6 @@ def align_audio_to_phonemes(waveform: torch.Tensor, sr: int, phonemes: List[str]
     if sr != 16000:
         waveform = torchaudio.functional.resample(waveform, sr, 16000)
         
-    waveform = waveform.to(device)
-    
     cleaned_phonemes = []
     for ph in phonemes:
         ph_clean = "".join(c for c in ph.lower() if c in dictionary)
@@ -309,32 +320,56 @@ def align_audio_to_phonemes(waveform: torch.Tensor, sr: int, phonemes: List[str]
                 is_training_active = True
                 
         if is_training_active:
-            # Training is active: backup training weights and load stable weights
+            # Training is active: backup training weights and load stable weights from CPU cache
             training_head_backup = {k: v.cpu().clone() for k, v in model.model.aux.state_dict().items()}
-            if MODEL_WEIGHTS_PATH.exists():
-                try:
-                    state_dict = torch.load(MODEL_WEIGHTS_PATH, map_location=device)
-                    model.model.aux.load_state_dict(state_dict)
-                except Exception as e:
-                    logger.error(f"Failed to load stable weights during training pause: {e}")
+            if stable_head_state_dict is not None:
+                model.model.aux.load_state_dict({k: v.to(device) for k, v in stable_head_state_dict.items()})
             else:
                 model.model.aux.load_state_dict({k: v.to(device) for k, v in base_head_state_dict.items()})
         else:
-            # Training is NOT active: load stable weights (just in case they changed on disk)
-            if MODEL_WEIGHTS_PATH.exists():
-                try:
-                    state_dict = torch.load(MODEL_WEIGHTS_PATH, map_location=device)
-                    model.model.aux.load_state_dict(state_dict)
-                except Exception as e:
-                    logger.error(f"Failed to load stable weights: {e}")
+            # Training is NOT active: stable weights are already loaded. No disk load or state modification needed!
+            pass
 
         model.eval()
         torch.cuda.empty_cache()
-        with torch.inference_mode():
-            with torch.autocast(device_type="cuda" if "cuda" in str(device) else "cpu", dtype=torch.float16 if "cuda" in str(device) else torch.bfloat16):
-                emissions, _ = model(waveform)
-            # Move to CPU and clone/detach to release GPU memory and lock safely
-            emissions = emissions.cpu().detach().clone()
+        
+        # Try running on GPU first
+        run_on_gpu_success = False
+        if "cuda" in str(device):
+            try:
+                dev_waveform = waveform.to(device)
+                try:
+                    with torch.inference_mode():
+                        # Run in float32 without autocast to avoid OOM fallback bugs on laptop GPUs
+                        emissions, _ = model(dev_waveform)
+                    emissions = emissions.float().cpu().detach().clone()
+                    run_on_gpu_success = True
+                finally:
+                    if 'dev_waveform' in locals():
+                        del dev_waveform
+                    torch.cuda.empty_cache()
+            except RuntimeError as gpu_e:
+                if "out of memory" in str(gpu_e).lower():
+                    logger.warning("CUDA Out of Memory during alignment inference. Falling back to CPU...")
+                    torch.cuda.empty_cache()
+                else:
+                    raise gpu_e
+        
+        if not run_on_gpu_success:
+            logger.info("Running alignment inference on CPU...")
+            model.to("cpu")
+            try:
+                with torch.inference_mode():
+                    # Run CPU in float32, converting emissions to float32 to avoid CTC aligner type errors
+                    emissions, _ = model(waveform.to("cpu"))
+                emissions = emissions.float().cpu().detach().clone()
+            except Exception as cpu_e:
+                logger.error(f"CPU Fallback alignment failed: {cpu_e}")
+                raise cpu_e
+            finally:
+                if "cuda" in str(device):
+                    model.to(device)
+                    torch.cuda.empty_cache()
             
         if training_head_backup is not None:
             model.model.aux.load_state_dict({k: v.to(device) for k, v in training_head_backup.items()})
@@ -560,8 +595,17 @@ def align_batch(
                 if temp_wav_path.exists():
                     temp_wav_path.unlink()
 
-        # Reserve at least 2 cores for Uvicorn to ensure status checks respond under load
-        max_workers = max(1, (os.cpu_count() or 4) - 2)
+        # Limit the number of parallel workers to save memory and avoid CPU/GPU contention.
+        # Default is 4, but can be overridden by environment variable MAX_ALIGN_WORKERS.
+        env_max_workers = os.environ.get("MAX_ALIGN_WORKERS")
+        if env_max_workers:
+            try:
+                max_workers = int(env_max_workers)
+            except ValueError:
+                max_workers = 4
+        else:
+            max_workers = min(4, max(1, (os.cpu_count() or 4) - 2))
+            
         max_workers = min(len(tasks), max_workers)
         if max_workers > 0:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
