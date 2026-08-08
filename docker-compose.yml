@@ -68,6 +68,8 @@ services:
     build:
       context: ./microservices/segmentation_service
       dockerfile: Dockerfile
+      args:
+        SEGMENTATION_ALGORITHM_REF: ${SEGMENTATION_ALGORITHM_REF:-ac1dd3977bb76f84a6258776a90a3f0bc19f8b01}
     image: diffsinger-segmentation-service:latest
     container_name: segmentation_api
     ports:
