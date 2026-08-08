@@ -166,12 +166,13 @@ def create_app() -> FastAPI:
             if await asyncio.to_thread(sha256_file, wav_path) != identity["wav_sha256"]:
                 raise HTTPException(status_code=409, detail="WAV changed during processing")
             data = overlay_data(result)
-            await asyncio.to_thread(write_cache, cache_path, {
+            envelope = {
                 "schema_version": CACHE_SCHEMA_VERSION,
                 "identity": identity,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "data": data,
-            })
+            }
+            await asyncio.to_thread(write_cache, cache_path, envelope)
             return data
 
     @app.get("/red-boundaries/{filename}")

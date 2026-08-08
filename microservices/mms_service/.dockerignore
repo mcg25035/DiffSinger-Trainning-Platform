@@ -1,0 +1,11 @@
+data/
+app/__pycache__/
+app/*.wav
+app/*.png
+app/charsiu_repo/
+app/plots/
+app/plots_flattened/
+app/compare_configs.py
+app/debug_backtrack.py
+app/experiment_partition.py
+app/test_cosine.py

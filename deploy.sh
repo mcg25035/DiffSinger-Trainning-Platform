@@ -7,6 +7,15 @@ set -e
 PROJECT_ROOT=$(pwd)
 PIPE="/run/ds-platform/trigger"
 
+# One-time migration for persisted MMS weights/data from the previous layout.
+LEGACY_MMS_DATA="$PROJECT_ROOT/mms_service/data"
+MMS_DATA="$PROJECT_ROOT/microservices/mms_service/data"
+if [ -d "$LEGACY_MMS_DATA" ] && [ ! -e "$MMS_DATA" ]; then
+    mkdir -p "$(dirname "$MMS_DATA")"
+    mv "$LEGACY_MMS_DATA" "$MMS_DATA"
+    echo "📦 已將 MMS runtime data 搬到 microservices/"
+fi
+
 # 載入 .env 檔案 (L1 Override)
 if [ -f .env ]; then
     export $(cat .env | grep -v '#' | xargs)

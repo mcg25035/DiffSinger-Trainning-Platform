@@ -240,7 +240,7 @@ flowchart LR
 
 ## MFA 對齊服務 (Docker)
 
-> [mfa/mfa_service/](../mfa/mfa_service/) 目錄
+> [microservices/mfa/mfa_service/](../microservices/mfa/mfa_service/) 目錄
 
 ### FastAPI 端點
 
@@ -273,7 +273,7 @@ Stage 2 — 寬鬆模式
 
 ### 日文音素映射
 
-> [japanese_mfa.json](../mfa/mfa_service/app/mappings/japanese_mfa.json)
+> [japanese_mfa.json](../microservices/mfa/mfa_service/app/mappings/japanese_mfa.json)
 
 - **114** 個辭典條目（羅馬字 → IPA 音素序列）
 - **33** 個反向映射（IPA → 羅馬字）
@@ -283,7 +283,7 @@ Stage 2 — 寬鬆模式
 
 ## 歌詞辨識服務 (Docker)
 
-> [lyrics_regonizer/](../lyrics_regonizer/) 目錄
+> [microservices/lyrics_regonizer/](../microservices/lyrics_regonizer/) 目錄
 
 ### 處理流程
 
@@ -395,11 +395,6 @@ flowchart TD
 
 | 檔案 | 說明 |
 |------|------|
-| [test_mfa.py](../test_mfa.py) | 單一檔案 MFA 對齊測試 |
-| [test_mfa_multi.py](../test_mfa_multi.py) | 多切段對齊測試 (001-003) |
-| [test_mfa_confidence_batch.py](../test_mfa_confidence_batch.py) | 批次對齊 + 信心分數測試 |
-| [test_mfa_mismatch.py](../test_mfa_mismatch.py) | 壓力測試：正確音訊 + 錯誤歌詞 |
-| [test_mfa_real_mismatch.py](../test_mfa_real_mismatch.py) | 真實場景不匹配測試 |
 | [test_full_baseline.py](../test_full_baseline.py) | 全資料集批次測試（50 個一批） |
 
 ---
@@ -427,18 +422,22 @@ DiffSinger-Trainning-Platform/
 │   │   └── utils/               # 工具函式
 │   └── vite.config.ts
 │
-├── mfa/mfa_service/             # MFA Docker 服務
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   ├── app/
-│   │   ├── main.py              # FastAPI 對齊 API
-│   │   └── mappings/            # 音素映射檔
-│   └── run.sh
-│
-├── lyrics_regonizer/            # 歌詞辨識 Docker 服務
-│   ├── Dockerfile               # pip-to-uv 包裝器
-│   ├── docker-compose.yml
-│   └── app.py                   # FastAPI 辨識 API
+├── microservices/               # 獨立 Docker 微服務
+│   ├── mfa/mfa_service/         # MFA 對齊 API
+│   │   ├── Dockerfile
+│   │   ├── docker-compose.yml
+│   │   ├── app/
+│   │   │   ├── main.py
+│   │   │   └── mappings/
+│   │   └── run.sh
+│   ├── mms_service/             # MMS 對齊與微調 API
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── app/
+│   └── lyrics_regonizer/        # 歌詞辨識 API
+│       ├── Dockerfile
+│       ├── docker-compose.yml
+│       └── app.py
 │
 ├── scripts/                     # 部署與安全腳本
 │   ├── resolve_env.sh           # 環境自動偵測
@@ -452,7 +451,7 @@ DiffSinger-Trainning-Platform/
 ├── public/                      # 前端建置輸出
 ├── docs/                        # 文件 (待填充)
 ├── .github/workflows/           # GitHub Actions CI/CD
-└── test_*.py                    # Python 測試腳本
+└── test_full_baseline.py        # 手動 MFA 全資料集診斷
 ```
 
 ---

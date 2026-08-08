@@ -61,3 +61,26 @@
 MFA_PORT=8001
 \`\`\`
 修改後執行 \`./update.sh\` 即可套用。
+
+## Microservices
+
+三個獨立 Docker 服務集中在 `microservices/`：
+
+```text
+microservices/mfa/mfa_service/   MFA 對齊服務
+microservices/mms_service/       MMS 對齊與微調服務
+microservices/lyrics_regonizer/  歌詞辨識服務
+```
+
+部署入口仍是根目錄的 `docker-compose.yml` 與 `deploy.sh`，服務名稱、連接埠、
+image 名稱及 `mfa_data_storage` Docker volume 均未改變。
+
+## 獨立子專案
+
+Attention Labeler 已集中在 `projects/attention-labeler/`，不屬於主平台的
+CI/CD 啟動流程。它包含自己的前端、後端、標註資料、演算法基準、實驗工具與
+操作文件；啟動方式請參考 `projects/attention-labeler/README.md`。
+
+MFA、MMS 與人工標註的歷史比較實驗集中在 `exp-mfa-pretrain/`，同樣不屬於
+主平台 CI/CD；其資料、模型、run workspace、報表與維護入口請參考
+`exp-mfa-pretrain/README.md`。

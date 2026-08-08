@@ -23,8 +23,8 @@ echo "[ds-daemon] Project root: $PROJECT_ROOT"
 echo "[ds-daemon] Listening on: $PIPE"
 
 # 確保 MMS 訓練與權重目錄存在且有適當權限，防止 Node.js 寫入權限問題
-mkdir -p "$PROJECT_ROOT/mms_service/data/training_data"
-chmod -R 777 "$PROJECT_ROOT/mms_service/data" || true
+mkdir -p "$PROJECT_ROOT/microservices/mms_service/data/training_data"
+chmod -R 777 "$PROJECT_ROOT/microservices/mms_service/data" || true
 
 while true; do
     if read -r cmd <&3; then
@@ -33,8 +33,8 @@ while true; do
                 echo "[ds-daemon] $(date '+%Y-%m-%d %H:%M:%S') Received 'up', starting services..."
                 
                 # 再次確保目錄權限正確（以防 Docker 重建目錄）
-                mkdir -p "$PROJECT_ROOT/mms_service/data/training_data"
-                chmod -R 777 "$PROJECT_ROOT/mms_service/data" || true
+                mkdir -p "$PROJECT_ROOT/microservices/mms_service/data/training_data"
+                chmod -R 777 "$PROJECT_ROOT/microservices/mms_service/data" || true
                 
                 # 每次執行前動態解析環境（CUDA/GPU 偵測）
                 source "$PROJECT_ROOT/scripts/resolve_env.sh" || true

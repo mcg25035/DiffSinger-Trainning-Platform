@@ -2,6 +2,9 @@
 
 # 智慧偵測 GPU 與啟動 MFA 服務
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 # 偵測是否具備 NVIDIA GPU 驅動
 if command -v nvidia-smi &> /dev/null; then
     echo "🚀 偵測到 NVIDIA GPU，準備啟動 GPU 加速模式..."
