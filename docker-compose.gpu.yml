@@ -21,6 +21,7 @@ services:
 
   mms-service:
     deploy:
+      replicas: 0
       resources:
         reservations:
           devices:
