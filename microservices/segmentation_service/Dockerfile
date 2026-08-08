@@ -10,6 +10,8 @@ COPY requirements.lock .
 RUN pip install --no-cache-dir -r requirements.lock
 
 COPY app.py .
+ADD https://raw.githubusercontent.com/mcg25035/Singing-Voice-Segmentation-Algorithm/ac1dd3977bb76f84a6258776a90a3f0bc19f8b01/pipeline.py /algorithm/pipeline.py
+ADD https://raw.githubusercontent.com/mcg25035/Singing-Voice-Segmentation-Algorithm/ac1dd3977bb76f84a6258776a90a3f0bc19f8b01/segment_regions.py /algorithm/segment_regions.py
 
 ENV PYTHONPATH=/algorithm \
     PYTHONDONTWRITEBYTECODE=1 \
