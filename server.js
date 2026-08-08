@@ -7,6 +7,7 @@ const FormData = require('form-data');
 const mfaService = require('./services/mfa-client');
 const lyricsService = require('./services/lyrics-client');
 const mmsService = require('./services/mms-client');
+const segmentationService = require('./services/segmentation-client');
 
 const app = express();
 require('dotenv').config();
@@ -40,6 +41,68 @@ if (!fs.existsSync(dictionariesDir)) {
 const mappingsDir = path.join(__dirname, 'mfa/mfa_service/app/mappings');
 if (!fs.existsSync(mappingsDir)) {
     fs.mkdirSync(mappingsDir, { recursive: true });
+}
+
+let activeSegmentationSync = null;
+let segmentationTimer = null;
+let segmentationRerunRequested = false;
+const segmentationStatus = {
+    state: 'idle', total: 0, completed: 0, failed: 0,
+    currentFile: null, startedAt: null, finishedAt: null, errors: [],
+};
+
+async function syncSegmentationCache() {
+    if (activeSegmentationSync) return activeSegmentationSync;
+    activeSegmentationSync = (async () => {
+        const health = await segmentationService.healthCheck();
+        if (!health.ok) throw new Error(health.error || 'Segmentation service unavailable');
+        const files = fs.readdirSync(segmentsDir)
+            .filter(file => file.toLowerCase().endsWith('.wav'))
+            .sort();
+        Object.assign(segmentationStatus, {
+            state: 'processing', total: files.length, completed: 0, failed: 0,
+            currentFile: null, startedAt: new Date().toISOString(),
+            finishedAt: null, errors: [],
+        });
+        for (const filename of files) {
+            segmentationStatus.currentFile = filename;
+            try {
+                await segmentationService.compute(filename);
+                segmentationStatus.completed++;
+            } catch (error) {
+                segmentationStatus.failed++;
+                segmentationStatus.errors.push({ filename, error: error.message });
+                if (segmentationStatus.errors.length > 100) segmentationStatus.errors.shift();
+                console.error(`[SEGMENTATION] Failed ${filename}:`, error.message);
+            }
+        }
+        segmentationStatus.state = 'idle';
+        segmentationStatus.currentFile = null;
+        segmentationStatus.finishedAt = new Date().toISOString();
+    })().finally(() => {
+        activeSegmentationSync = null;
+        if (segmentationRerunRequested) {
+            segmentationRerunRequested = false;
+            scheduleSegmentationSync(0);
+        }
+    });
+    return activeSegmentationSync;
+}
+
+function scheduleSegmentationSync(delayMs = 3000) {
+    if (segmentationTimer) clearTimeout(segmentationTimer);
+    segmentationTimer = setTimeout(() => {
+        segmentationTimer = null;
+        if (activeSegmentationSync) {
+            segmentationRerunRequested = true;
+            return;
+        }
+        syncSegmentationCache().catch(error => {
+            segmentationStatus.state = 'unavailable';
+            console.error('[SEGMENTATION] Sync failed:', error.message);
+            if (IS_PROD) scheduleSegmentationSync(60000);
+        });
+    }, delayMs);
 }
 
 // In-memory job tracking
@@ -379,6 +442,7 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
     if (type === 'upload_segments') {
         // Trigger async transcription without waiting for response
         transcribeFile(filename);
+        scheduleSegmentationSync();
     }
 
     res.json({ filename: filename });
@@ -417,11 +481,13 @@ app.post('/upload_complete', express.json(), (req, res) => {
         writeStream.write(data);
         fs.unlinkSync(chunkPath);
     }
-    writeStream.end();
-    
     if (type === 'upload_segments') {
-        transcribeFile(finalName);
+        writeStream.once('finish', () => {
+            transcribeFile(finalName);
+            scheduleSegmentationSync();
+        });
     }
+    writeStream.end();
     
     res.json({ filename: finalName });
 });
@@ -516,6 +582,7 @@ app.post('/api/align', express.json(), async (req, res) => {
 // --- MMS-FA Fine-tuning / Training endpoints & Cron ---
 
 const IS_PROD = process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'prod';
+const MMS_AUTO_TRAINING_ENABLED = false;
 
 const fingerprintPath = path.join(__dirname, 'mms_service/data/last_trained_fingerprint.txt');
 
@@ -656,17 +723,7 @@ async function syncAndTrain(options = {}) {
 }
 
 app.post('/api/mms/sync-train', express.json(), async (req, res) => {
-    const { epochs, lr, dictionaryId } = req.body;
-    try {
-        const { count, result } = await syncAndTrain({ epochs, lr, dictionaryId });
-        res.json({
-            message: `Successfully synced ${count} segments. Fine-tuning started in the background.`,
-            status: result.status || 'started'
-        });
-    } catch (err) {
-        console.error(`[MMS-TRAIN] Sync and train failed:`, err.message);
-        res.status(500).json({ error: err.message });
-    }
+    res.status(503).json({ error: 'MMS training is disabled' });
 });
 
 app.post('/api/mms/train/stop', async (req, res) => {
@@ -680,7 +737,7 @@ app.post('/api/mms/train/stop', async (req, res) => {
 
 
 // 非 dev 的正式環境：定期檢查並跑客製化微調
-if (IS_PROD) {
+if (MMS_AUTO_TRAINING_ENABLED && IS_PROD) {
     console.log('[MMS-AUTO-TRAIN] Production mode. Scheduling periodic auto-training check.');
     
     const runCheck = async () => {
@@ -714,6 +771,33 @@ if (IS_PROD) {
     setTimeout(runCheck, 10000);
     setInterval(runCheck, 3600000); // 1小時 = 3,600,000 ms
 }
+
+app.get('/api/red-boundaries/:filename', async (req, res) => {
+    const filename = req.params.filename;
+    if (!filename || path.basename(filename) !== filename || !filename.toLowerCase().endsWith('.wav')) {
+        return res.status(400).json({ error: 'Invalid WAV filename' });
+    }
+    if (!fs.existsSync(path.join(segmentsDir, filename))) {
+        return res.status(404).json({ error: 'WAV not found' });
+    }
+    try {
+        res.json(await segmentationService.getCached(filename));
+    } catch (error) {
+        if (error.response?.status === 404) {
+            return res.status(404).json({ error: 'Boundary cache not ready' });
+        }
+        res.status(503).json({ error: 'Segmentation service unavailable' });
+    }
+});
+
+app.get('/api/segmentation/status', (req, res) => {
+    res.json({ ...segmentationStatus, errors: [...segmentationStatus.errors] });
+});
+
+app.post('/api/segmentation/sync', (req, res) => {
+    scheduleSegmentationSync(0);
+    res.status(202).json({ status: 'scheduled' });
+});
 
 app.get('/api/mms/status', async (req, res) => {
     try {
@@ -908,9 +992,22 @@ app.listen(PORT, async () => {
         console.warn(`⚠️ ${name} service not ready after ${maxWait / 1000}s, continuing anyway`);
     };
 
+    const mmsReady = waitFor('MMS', mmsService.healthCheck);
+    mmsReady.then(async () => {
+        try {
+            await mmsService.stopTraining();
+            console.log('[MMS-TRAIN] Training is disabled and any active training was stopped.');
+        } catch (error) {
+            console.warn('[MMS-TRAIN] Unable to confirm training stop:', error.message);
+        }
+    });
+    if (IS_PROD) {
+        scheduleSegmentationSync(10000);
+        setInterval(() => scheduleSegmentationSync(0), 3600000);
+    }
     await Promise.all([
         waitFor('MFA', mfaService.healthCheck),
         waitFor('Lyrics', lyricsService.healthCheck),
-        waitFor('MMS', mmsService.healthCheck),
+        mmsReady,
     ]);
 });
