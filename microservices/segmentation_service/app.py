@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import os
-import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -88,19 +87,6 @@ def write_cache(path: Path, envelope: dict[str, Any]) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def migrate_legacy_cache(legacy_root: Path, cache_root: Path) -> None:
-    if not legacy_root.is_dir():
-        return
-    cache_root.mkdir(parents=True, exist_ok=True)
-    for source in legacy_root.glob("*.json"):
-        destination = cache_root / source.name
-        if destination.exists():
-            continue
-        temporary = cache_root / f".{source.name}.migrating"
-        shutil.copyfile(source, temporary)
-        os.replace(temporary, destination)
-
-
 def overlay_data(result: dict[str, Any]):
     height, width = result["stft_image"].shape
     audio = result["audio_metadata"]
@@ -125,7 +111,6 @@ def overlay_data(result: dict[str, Any]):
 def create_app() -> FastAPI:
     wav_root = Path(os.environ.get("WAV_ROOT", "/data/wavs"))
     cache_root = Path(os.environ.get("CACHE_ROOT", "/data/cache"))
-    legacy_cache_root = Path(os.environ.get("LEGACY_CACHE_ROOT", "/data/legacy-cache"))
     build_id = algorithm_build_id()
     pipeline = SegmentationPipeline(
         stft_params={"n_fft": 4096, "hop_ms": 1.0, "max_frequency_hz": 4000.0}
@@ -137,7 +122,6 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await asyncio.to_thread(cache_root.mkdir, parents=True, exist_ok=True)
-        await asyncio.to_thread(migrate_legacy_cache, legacy_cache_root, cache_root)
         yield
 
     app = FastAPI(title="DiffSinger segmentation service", lifespan=lifespan)
