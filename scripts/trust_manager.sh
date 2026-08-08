@@ -11,6 +11,13 @@ function get_manifest() {
         \( -name "*.sh" -o -name "*.py" -o -name "*.js" -o -name "Dockerfile" -o -name "*.yml" -o -name "*.yaml" -o -name ".env" \) \
         -not -path "*/.git/*" \
         -not -path "*/node_modules/*" \
+        -not -path "$PROJECT_ROOT/projects/*" \
+        -not -path "$PROJECT_ROOT/exp-mfa-pretrain/*" \
+        -not -path "$PROJECT_ROOT/archives/*" \
+        -not -path "$PROJECT_ROOT/datasets/*" \
+        -not -path "$PROJECT_ROOT/experiments/*" \
+        -not -path "$PROJECT_ROOT/outputs/*" \
+        -not -path "$PROJECT_ROOT/scratch/*" \
         -not -path "*/uploads/*" \
         -not -path "*/upload_segments/*" | sort | xargs sha256sum | sha256sum | cut -d' ' -f1
 }

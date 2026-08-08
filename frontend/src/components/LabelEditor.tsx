@@ -28,7 +28,10 @@ import { PhonemeEditPanel } from './label-editor/PhonemeEditPanel';
 import { RegionButtonTrack } from './label-editor/RegionButtonTrack';
 import { LyricsDisplay } from './label-editor/LyricsDisplay';
 import { ReasonModal, type BoundaryInfo } from './label-editor/ReasonModal';
-import { D114514BoundaryOverlay } from './label-editor/D114514BoundaryOverlay';
+import {
+  D114514BoundaryOverlay,
+  type D114514BoundaryOverlayData,
+} from './label-editor/D114514BoundaryOverlay';
 import './label-editor/LabelEditor.css';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 import type { LabSegment } from '../utils/labParser';
@@ -64,6 +67,7 @@ export function LabelEditor({
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [activeLabType, setActiveLabType] = useState<'lab' | 'lab2'>('lab');
   const [hasLab2, setHasLab2] = useState(false);
+  const [boundaryOverlayData, setBoundaryOverlayData] = useState<D114514BoundaryOverlayData | null>(null);
   const hasLab2Ref = useRef(false);
 
   const savedTimeRef = useRef<number>(0);
@@ -96,6 +100,30 @@ export function LabelEditor({
 
     return () => controller.abort();
   }, [recording.filename]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setBoundaryOverlayData(null);
+    if (recording.type !== 'segment') return () => controller.abort();
+
+    fetch(`/api/red-boundaries/${encodeURIComponent(recording.filename)}`, {
+      signal: controller.signal,
+    })
+      .then(async response => {
+        if (response.status === 404) return null;
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<D114514BoundaryOverlayData>;
+      })
+      .then(data => {
+        if (data) setBoundaryOverlayData(data);
+      })
+      .catch(error => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        console.warn('Unable to load segmentation boundaries:', error);
+      });
+
+    return () => controller.abort();
+  }, [recording.filename, recording.type]);
 
   // 用於在拖曳時保存起始狀態
   const dragStartPositionsRef = useRef<Map<string, { start: number; end: number }> | null>(null);
@@ -695,7 +723,7 @@ export function LabelEditor({
               isLoaded={wavesurfer.isLoaded}
               waveformHeight={waveformHeight}
               spectrogramHeight={spectrogramHeight}
-              data={null}
+              data={boundaryOverlayData}
             />
           </div>
 

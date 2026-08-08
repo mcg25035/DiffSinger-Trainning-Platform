@@ -1,0 +1,7 @@
+fastapi==0.141.1
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+pillow==10.2.0
+scipy==1.17.1
+soundfile==0.13.1
+uvicorn==0.41.0

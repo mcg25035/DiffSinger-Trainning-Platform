@@ -1,9 +1,9 @@
 services:
   mfa-service:
     deploy:
-      replicas: 0
+      replicas: 1
     build:
-      context: ./mfa/mfa_service
+      context: ./microservices/mfa/mfa_service
       dockerfile: Dockerfile
     image: mfa-aligner-service:latest
     container_name: mfa_aligner_api
@@ -11,7 +11,7 @@ services:
       - "${MFA_PORT:-8001}:8001"
     volumes:
       - mfa_data:/home/mfauser/Documents/MFA
-      - ./mfa/mfa_service/app:/app
+      - ./microservices/mfa/mfa_service/app:/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
@@ -24,7 +24,7 @@ services:
     deploy:
       replicas: 0
     build:
-      context: ./lyrics_regonizer
+      context: ./microservices/lyrics_regonizer
       args:
         BASE_IMAGE: nvidia/cuda:${BASE_IMAGE_TAG:-11.0.3-base-ubuntu20.04}
         PYTORCH_INDEX: ${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu110}
@@ -43,7 +43,7 @@ services:
 
   mms-service:
     build:
-      context: ./mms_service
+      context: ./microservices/mms_service
       dockerfile: Dockerfile
       args:
         BASE_IMAGE: ${MMS_BASE_IMAGE:-pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime}
@@ -54,8 +54,8 @@ services:
     ports:
       - "${MMS_PORT:-8002}:8002"
     volumes:
-      - ./mms_service/data:/app/data
-      - ./mms_service/app:/app
+      - ./microservices/mms_service/data:/app/data
+      - ./microservices/mms_service/app:/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\" || exit 1"]
@@ -64,6 +64,32 @@ services:
       retries: 3
       start_period: 60s
 
+  segmentation-service:
+    build:
+      context: ./microservices/segmentation_service
+      dockerfile: Dockerfile
+    image: diffsinger-segmentation-service:latest
+    container_name: segmentation_api
+    ports:
+      - "127.0.0.1:${SEGMENTATION_PORT:-8010}:8010"
+    volumes:
+      - ./upload_segments:/data/wavs:ro
+      - ${SEGMENTATION_ALGORITHM_PATH:-/media/codingbear/code/DiffSinger-Segmentation-Algorithm}:/algorithm:ro
+      - segmentation_cache:/data/cache
+    environment:
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 volumes:
   mfa_data:
+    external: true
     name: mfa_data_storage
+  segmentation_cache:
