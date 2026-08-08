@@ -29,6 +29,10 @@ interface Props {
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
   filename?: string;
+  // Layer Switcher
+  activeLabType?: 'lab' | 'lab2';
+  hasLab2?: boolean;
+  onLabTypeChange?: (labType: 'lab' | 'lab2') => void;
   // Navigation
   onNext?: () => void;
   onPrevious?: () => void;
@@ -55,6 +59,9 @@ export function LabelToolbar({
   isFullscreen = false,
   onToggleFullscreen,
   filename,
+  activeLabType = 'lab',
+  hasLab2 = false,
+  onLabTypeChange,
   onNext,
   onPrevious,
 }: Props) {
@@ -85,6 +92,43 @@ export function LabelToolbar({
       <div className="label-toolbar__left">
         <div className="label-toolbar__title-group">
           <h2 className="label-toolbar__title">{filename || 'VISUAL LABELER'}</h2>
+
+          {/* LAB2 maintenance controls stay hidden for normal recordings. */}
+          {hasLab2 && <div style={{ display: 'flex', alignItems: 'center', backgroundColor: '#18181b', borderRadius: '16px', padding: '2px', border: '1px solid #3f3f46' }}>
+            <button
+              onClick={() => onLabTypeChange?.('lab')}
+              style={{
+                padding: '4px 12px',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor: activeLabType === 'lab' ? '#2563eb' : 'transparent',
+                color: activeLabType === 'lab' ? '#fff' : '#a1a1aa',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              📄 原始 (.lab)
+            </button>
+            <button
+              onClick={() => onLabTypeChange?.('lab2')}
+              style={{
+                padding: '4px 12px',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor: activeLabType === 'lab2' ? '#059669' : 'transparent',
+                color: activeLabType === 'lab2' ? '#fff' : '#a1a1aa',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              ✨ 規則精修 (.lab2)
+            </button>
+          </div>}
+
           {renderCloudIcon()}
         </div>
 
@@ -157,8 +201,8 @@ export function LabelToolbar({
         <button onClick={onCancel} className="label-toolbar__btn label-toolbar__btn--cancel">
           Cancel
         </button>
-        <button onClick={onSave} disabled={isSaving || !isLoaded} className="label-toolbar__btn label-toolbar__btn--save">
-          {isSaving ? 'Saving...' : 'Save Changes'}
+        <button onClick={onSave} disabled={isSaving || !isLoaded} className="label-toolbar__btn label-toolbar__btn--save" style={hasLab2 ? { background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)', color: '#fff', fontWeight: 600 } : undefined}>
+          {isSaving ? 'Saving...' : hasLab2 ? '💾 儲存為新算法 Lab' : 'Save Changes'}
         </button>
       </div>
     </div>

@@ -1,10 +1,5 @@
 /**
  * useLabelPersistence — Label 檔案載入/存檔 Hook
- *
- * 職責：
- *  - 從 API 載入 .lab 和 .conf 檔案
- *  - 存檔到 API
- *  - 管理 isDirty / saveStatus 狀態
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
@@ -18,8 +13,9 @@ import {
 } from '../utils/labParser';
 
 export interface UseLabelPersistenceReturn {
-  loadLabels: (duration: number) => Promise<LabSegment[]>;
-  saveLabels: (segments: LabSegment[]) => Promise<boolean>;
+  loadLabels: (duration: number, labType?: 'lab' | 'lab2') => Promise<LabSegment[]>;
+  saveLabels: (segments: LabSegment[], labType?: 'lab' | 'lab2') => Promise<boolean>;
+  saveAlgoLabel: (segments: LabSegment[], reason: string, boundaryInfo?: any) => Promise<boolean>;
   /** 觸發防抖自動存檔，呼叫時會重設 800ms 計時器 */
   triggerAutoSave: (getSegments: () => LabSegment[]) => void;
   isDirty: boolean;
@@ -53,10 +49,14 @@ export function useLabelPersistence(
   }, []);
 
   const loadLabels = useCallback(
-    async (duration: number): Promise<LabSegment[]> => {
+    async (duration: number, labType: 'lab' | 'lab2' = 'lab'): Promise<LabSegment[]> => {
       try {
+        const endpoint = labType === 'lab2'
+          ? `/api/lab2/${encodeURIComponent(recording.filename)}`
+          : `/api/lab/${encodeURIComponent(recording.filename)}`;
+
         const [labRes, confRes] = await Promise.all([
-          fetch(`/api/lab/${encodeURIComponent(recording.filename)}`),
+          fetch(endpoint),
           fetch(`/api/conf/${encodeURIComponent(recording.filename)}`).catch(
             () => null
           ),
@@ -74,6 +74,9 @@ export function useLabelPersistence(
           const filled = fillGaps(segments, duration);
 
           return filled;
+        } else if (labType === 'lab2') {
+          // A missing LAB2 is expected for recordings not in maintenance mode.
+          return [];
         } else {
           const txt = await labRes.text();
           setError(`Failed to load: ${labRes.status} ${txt}`);
@@ -90,8 +93,7 @@ export function useLabelPersistence(
   );
 
   const saveLabels = useCallback(
-    async (segments: LabSegment[]): Promise<boolean> => {
-      // 手動存檔時取消任何待處理的自動存檔
+    async (segments: LabSegment[], labType: 'lab' | 'lab2' = 'lab'): Promise<boolean> => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
@@ -101,8 +103,12 @@ export function useLabelPersistence(
       setSaveStatus('saving');
 
       const labContent = stringifyLabSegments(segments);
+      const endpoint = labType === 'lab2'
+        ? `/api/lab2/${recording.filename}`
+        : `/api/lab/${recording.filename}`;
+
       try {
-        const res = await fetch(`/api/lab/${recording.filename}`, {
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
           body: labContent,
@@ -127,7 +133,44 @@ export function useLabelPersistence(
     [recording.filename]
   );
 
-  // 防抖自動存檔：每次呼叫重設 800ms 計時器
+  const saveAlgoLabel = useCallback(
+    async (segments: LabSegment[], reason: string, boundaryInfo?: any): Promise<boolean> => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+
+      setIsSaving(true);
+      setSaveStatus('saving');
+
+      const labContent = stringifyLabSegments(segments);
+      try {
+        const res = await fetch(`/api/lab_algo/${recording.filename}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: labContent, reason, boundaryInfo }),
+        });
+
+        if (res.ok) {
+          setIsDirty(false);
+          setSaveStatus('saved');
+          return true;
+        } else {
+          setSaveStatus('error');
+          return false;
+        }
+      } catch (err) {
+        console.error(err);
+        setSaveStatus('error');
+        return false;
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [recording.filename]
+  );
+
+  // 防抖自動存檔
   const triggerAutoSave = useCallback(
     (getSegments: () => LabSegment[]) => {
       if (autoSaveTimerRef.current) {
@@ -176,6 +219,7 @@ export function useLabelPersistence(
   return {
     loadLabels,
     saveLabels,
+    saveAlgoLabel,
     triggerAutoSave,
     isDirty,
     setIsDirty,

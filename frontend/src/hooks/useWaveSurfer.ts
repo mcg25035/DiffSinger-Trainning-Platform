@@ -14,6 +14,9 @@ import RegionsPlugin from 'wavesurfer.js/plugins/regions';
 import Spectrogram from 'wavesurfer.js/plugins/spectrogram';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 
+const FFT_SAMPLES = 512;
+const FFT_OVERLAP = FFT_SAMPLES / 2;
+
 export interface UseWaveSurferOptions {
   containerRef: React.RefObject<HTMLDivElement | null>;
   url: string;
@@ -51,7 +54,7 @@ export function useWaveSurfer({
 }: UseWaveSurferOptions): UseWaveSurferReturn {
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
-  const spectrogramRef = useRef<any>(null);
+  const spectrogramRef = useRef<ReturnType<typeof Spectrogram.create> | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(initialZoom);
 
@@ -73,10 +76,11 @@ export function useWaveSurfer({
 
   // 初始化 WaveSurfer
   useEffect(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
 
     const ws = WaveSurfer.create({
-      container: containerRef.current,
+      container,
       waveColor: '#00e5ff',
       progressColor: 'rgba(0, 229, 255, 0.15)',
       cursorColor: '#fff',
@@ -92,26 +96,65 @@ export function useWaveSurfer({
     const regions = ws.registerPlugin(RegionsPlugin.create());
     const spec = ws.registerPlugin(
       Spectrogram.create({
+        fftSamples: FFT_SAMPLES,
+        noverlap: FFT_OVERLAP,
+        windowFunc: 'hann',
+        gainDB: 20,
+        rangeDB: 80,
         labels: true,
         height: spectrogramHeight,
         splitChannels: false,
         colorMap: 'igray',
         labelsColor: '#fff',
         labelsHzColor: '#fff',
+        scale: 'linear',
+        frequencyMin: 0,
+        frequencyMax: 4000,
       })
     );
     spectrogramRef.current = spec;
 
+    const alignSpectrogramFrames = () => {
+      const decoded = ws.getDecodedData();
+      if (!decoded || decoded.duration <= 0) return;
+
+      const hopSamples = FFT_SAMPLES - FFT_OVERLAP;
+      const frameCount = Math.max(
+        0,
+        Math.floor((decoded.length - FFT_SAMPLES - 1) / hopSamples) + 1
+      );
+      if (frameCount === 0) return;
+
+      const firstFrameCenter = (FFT_SAMPLES - 1) / 2 / decoded.sampleRate;
+      const analyzedSpan = (frameCount * hopSamples) / decoded.sampleRate;
+      const scaleX = analyzedSpan / decoded.duration;
+      const offsetPercent = (firstFrameCenter / decoded.duration) * 100;
+      const canvasContainer = (
+        spec as unknown as { canvasContainer?: HTMLElement }
+      ).canvasContainer;
+      if (!canvasContainer) return;
+
+      // WaveSurfer stretches complete forward FFT frames across the full audio.
+      // Restore each frame to its physical Hann-window center instead.
+      canvasContainer.style.transformOrigin = 'left center';
+      canvasContainer.style.transform =
+        `translateX(${offsetPercent}%) scaleX(${scaleX})`;
+    };
+
     // 停用 Regions Plugin 的重疊避免功能
-    (regions as any).avoidOverlapping = () => {};
+    (regions as unknown as { avoidOverlapping: () => void }).avoidOverlapping =
+      () => {};
 
     wavesurferRef.current = ws;
     regionsRef.current = regions;
 
     ws.once('ready', () => {
+      alignSpectrogramFrames();
       setIsLoaded(true);
       onReadyRef.current?.(ws, regions);
     });
+    const unsubscribeSpecReady = spec.on('ready', alignSpectrogramFrames);
+    const unsubscribeRedraw = ws.on('redraw', alignSpectrogramFrames);
 
     // Region 事件
     regions.on('region-update', (r: Region) => {
@@ -147,7 +190,7 @@ export function useWaveSurfer({
       const time = Math.max(0, Math.min(duration, (xInWrapper / scrollWidth) * duration));
       onRightClickRef.current?.(time);
     };
-    containerRef.current?.addEventListener('contextmenu', handleContextMenu);
+    container.addEventListener('contextmenu', handleContextMenu);
 
     // Ctrl+滾輪 zoom
     const handleWheel = (e: WheelEvent) => {
@@ -158,7 +201,7 @@ export function useWaveSurfer({
         );
       }
     };
-    containerRef.current?.addEventListener('wheel', handleWheel, {
+    container.addEventListener('wheel', handleWheel, {
       passive: false,
     });
 
@@ -172,18 +215,17 @@ export function useWaveSurfer({
     });
 
     return () => {
-      containerRef.current?.removeEventListener('wheel', handleWheel);
-      containerRef.current?.removeEventListener(
-        'contextmenu',
-        handleContextMenu
-      );
+      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('contextmenu', handleContextMenu);
+      unsubscribeSpecReady();
+      unsubscribeRedraw();
       ws.destroy();
       wavesurferRef.current = null;
       regionsRef.current = null;
       spectrogramRef.current = null;
       setIsLoaded(false);
     };
-  }, [url, waveformHeight, spectrogramHeight]);
+  }, [containerRef, initialZoom, url, waveformHeight, spectrogramHeight]);
 
   // Zoom 同步
   useEffect(() => {

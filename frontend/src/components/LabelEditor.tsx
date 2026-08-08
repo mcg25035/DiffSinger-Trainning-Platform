@@ -27,6 +27,8 @@ import { LabelToolbar } from './label-editor/LabelToolbar';
 import { PhonemeEditPanel } from './label-editor/PhonemeEditPanel';
 import { RegionButtonTrack } from './label-editor/RegionButtonTrack';
 import { LyricsDisplay } from './label-editor/LyricsDisplay';
+import { ReasonModal, type BoundaryInfo } from './label-editor/ReasonModal';
+import { D114514BoundaryOverlay } from './label-editor/D114514BoundaryOverlay';
 import './label-editor/LabelEditor.css';
 import type { Region } from 'wavesurfer.js/plugins/regions';
 import type { LabSegment } from '../utils/labParser';
@@ -57,10 +59,43 @@ export function LabelEditor({
   const setIsFullscreen = onFullscreenChange ?? setIsFullscreenLocal;
   const [containerHeight, setContainerHeight] = useState<number>(0);
 
+  const [isReasonModalOpen, setIsReasonModalOpen] = useState(false);
+  const [activeBoundaryInfo, setActiveBoundaryInfo] = useState<BoundaryInfo | null>(null);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [activeLabType, setActiveLabType] = useState<'lab' | 'lab2'>('lab');
+  const [hasLab2, setHasLab2] = useState(false);
+  const hasLab2Ref = useRef(false);
+
   const savedTimeRef = useRef<number>(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const lyrics = recording.lyrics || '';
   const lastUrlRef = useRef<string>('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    hasLab2Ref.current = false;
+    setHasLab2(false);
+    setActiveLabType('lab');
+    setIsReasonModalOpen(false);
+    setActiveBoundaryInfo(null);
+
+    fetch(`/api/lab2/${encodeURIComponent(recording.filename)}`, {
+      method: 'HEAD',
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) return;
+        hasLab2Ref.current = true;
+        setHasLab2(true);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        console.warn('Unable to check LAB2 availability:', error);
+      });
+
+    return () => controller.abort();
+  }, [recording.filename]);
 
   // 用於在拖曳時保存起始狀態
   const dragStartPositionsRef = useRef<Map<string, { start: number; end: number }> | null>(null);
@@ -111,8 +146,9 @@ export function LabelEditor({
     alignment.runAlignment();
     persistence.setIsDirty(true);
     persistence.setSaveStatus('idle');
-    // 自動存檔
-    persistence.triggerAutoSave(() => regionMgr.getCurrentSegments());
+    if (!hasLab2Ref.current) {
+      persistence.triggerAutoSave(() => regionMgr.getCurrentSegments());
+    }
   });
 
   // ── 歌詞對齊 Hook ──
@@ -188,7 +224,47 @@ export function LabelEditor({
         regionMgr.setStartPointerTime(region.start);
       } else {
         if (dragStartPositionsRef.current) {
+          const oldPos = dragStartPositionsRef.current.get(region.id);
           regionMgr.handleSegmentDragEnd(region.id, region.start, region.end, dragStartPositionsRef.current);
+
+          if (oldPos) {
+            const startShifted = Math.abs(oldPos.start - region.start) > 0.0005;
+            const endShifted = Math.abs(oldPos.end - region.end) > 0.0005;
+
+            if (hasLab2Ref.current && (startShifted || endShifted)) {
+              const sorted = [...regionMgr.segments].sort((a, b) => a.start - b.start);
+              const idx = sorted.findIndex((s) => s.id === region.id);
+
+              let phonemeBefore = '^';
+              let phonemeAfter = '$';
+              let oldTime = 0;
+              let newTime = 0;
+
+              if (startShifted && idx >= 0) {
+                phonemeBefore = idx > 0 ? sorted[idx - 1].label : '^';
+                phonemeAfter = sorted[idx].label;
+                oldTime = oldPos.start;
+                newTime = region.start;
+              } else if (endShifted && idx >= 0) {
+                phonemeBefore = sorted[idx].label;
+                phonemeAfter = idx < sorted.length - 1 ? sorted[idx + 1].label : '$';
+                oldTime = oldPos.end;
+                newTime = region.end;
+              }
+
+              const diffMs = Math.round((newTime - oldTime) * 1000);
+              const bndInfo: BoundaryInfo = {
+                phonemeBefore,
+                phonemeAfter,
+                oldTime,
+                newTime,
+                diffMs,
+              };
+
+              setActiveBoundaryInfo(bndInfo);
+              setIsReasonModalOpen(true);
+            }
+          }
         }
       }
       dragStartPositionsRef.current = null;
@@ -440,12 +516,46 @@ export function LabelEditor({
   }, [audio, wavesurfer.wavesurferRef, regionMgr.selectedRegionIds, regionMgr.startPointerTime]);
 
   const handleSave = useCallback(async () => {
-    const segments = regionMgr.getCurrentSegments();
-    const ok = await persistence.saveLabels(segments);
+    if (hasLab2Ref.current) {
+      setIsReasonModalOpen(true);
+      return;
+    }
+
+    const ok = await persistence.saveLabels(regionMgr.getCurrentSegments());
     if (!ok) {
       alert('Save failed');
     }
   }, [regionMgr, persistence]);
+
+  const handleConfirmSaveAlgo = useCallback(async (reason: string) => {
+    const segments = regionMgr.getCurrentSegments();
+    const ok = await persistence.saveAlgoLabel(segments, reason, activeBoundaryInfo);
+    if (ok) {
+      setIsReasonModalOpen(false);
+      const bndTag = activeBoundaryInfo ? `【${activeBoundaryInfo.phonemeBefore} | ${activeBoundaryInfo.phonemeAfter}】` : '';
+      setActiveBoundaryInfo(null);
+      setSuccessToast(`已成功記錄邊界理由 ${bndTag} 並新建 Lab！`);
+      setTimeout(() => setSuccessToast(null), 4500);
+    } else {
+      alert('記錄邊界對齊失敗');
+    }
+  }, [regionMgr, persistence, activeBoundaryInfo]);
+
+  const handleLabTypeChange = useCallback(async (type: 'lab' | 'lab2') => {
+    if (type === 'lab2' && !hasLab2Ref.current) return;
+
+    setActiveLabType(type);
+    const ws = wavesurfer.wavesurferRef.current;
+    if (ws) {
+      const duration = ws.getDuration();
+      const loadedSegments = await persistence.loadLabels(duration, type);
+      if (loadedSegments.length > 0) {
+        regionMgr.loadSegments(loadedSegments);
+        setSuccessToast(`已切換對齊標籤層：${type === 'lab2' ? '✨ 規則精修 (.lab2)' : '📄 原始 (.lab)'}`);
+        setTimeout(() => setSuccessToast(null), 3000);
+      }
+    }
+  }, [wavesurfer.wavesurferRef, persistence, regionMgr]);
 
   const handleCancel = useCallback(() => {
     if (persistence.isDirty) {
@@ -565,6 +675,9 @@ export function LabelEditor({
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
         filename={recording.filename}
+        activeLabType={activeLabType}
+        hasLab2={hasLab2}
+        onLabTypeChange={handleLabTypeChange}
         onNext={onNext}
         onPrevious={onPrevious}
       />
@@ -576,6 +689,13 @@ export function LabelEditor({
               id="label-editor-waveform"
               ref={containerRef}
               className="label-editor__waveform"
+            />
+            <D114514BoundaryOverlay
+              wavesurferRef={wavesurfer.wavesurferRef}
+              isLoaded={wavesurfer.isLoaded}
+              waveformHeight={waveformHeight}
+              spectrogramHeight={spectrogramHeight}
+              data={null}
             />
           </div>
 
@@ -614,6 +734,39 @@ export function LabelEditor({
         </div>
       </div>
       <LyricsDisplay lyrics={lyrics} visible={isFullscreen} />
+
+      {successToast && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          backgroundColor: '#065f46',
+          border: '1px solid #10b981',
+          color: '#ecfdf5',
+          padding: '12px 20px',
+          borderRadius: '10px',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
+          zIndex: 200001,
+          fontSize: '14px',
+          fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}>
+          <span>✨</span> {successToast}
+        </div>
+      )}
+
+      <ReasonModal
+        isOpen={hasLab2 && isReasonModalOpen}
+        filename={recording.filename}
+        boundaryInfo={activeBoundaryInfo}
+        onConfirm={handleConfirmSaveAlgo}
+        onCancel={() => {
+          setIsReasonModalOpen(false);
+          setActiveBoundaryInfo(null);
+        }}
+      />
     </div>
   );
 }
