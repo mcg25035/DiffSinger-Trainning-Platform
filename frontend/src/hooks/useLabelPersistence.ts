@@ -14,10 +14,10 @@ import {
 
 export interface UseLabelPersistenceReturn {
   loadLabels: (duration: number, labType?: 'lab' | 'lab2') => Promise<LabSegment[]>;
-  saveLabels: (segments: LabSegment[], labType?: 'lab' | 'lab2') => Promise<boolean>;
-  saveAlgoLabel: (segments: LabSegment[], reason: string, boundaryInfo?: any) => Promise<boolean>;
+  saveLabels: (segments: LabSegment[], labType?: 'lab' | 'lab2', duration?: number) => Promise<boolean>;
+  saveAlgoLabel: (segments: LabSegment[], reason: string, boundaryInfo?: any, duration?: number) => Promise<boolean>;
   /** 觸發防抖自動存檔，呼叫時會重設 800ms 計時器 */
-  triggerAutoSave: (getSegments: () => LabSegment[]) => void;
+  triggerAutoSave: (getSegments: () => LabSegment[], getDuration?: () => number) => void;
   isDirty: boolean;
   setIsDirty: (dirty: boolean) => void;
   saveStatus: 'idle' | 'saving' | 'saved' | 'error';
@@ -92,8 +92,12 @@ export function useLabelPersistence(
     [recording.filename]
   );
 
+  // 存檔前填補空隙(不能有沒音素的時候):duration > 0 才補,否則照原樣序列化
+  const serialize = (segments: LabSegment[], duration?: number): string =>
+    stringifyLabSegments(duration && duration > 0 ? fillGaps(segments, duration) : segments);
+
   const saveLabels = useCallback(
-    async (segments: LabSegment[], labType: 'lab' | 'lab2' = 'lab'): Promise<boolean> => {
+    async (segments: LabSegment[], labType: 'lab' | 'lab2' = 'lab', duration?: number): Promise<boolean> => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
@@ -102,7 +106,7 @@ export function useLabelPersistence(
       setIsSaving(true);
       setSaveStatus('saving');
 
-      const labContent = stringifyLabSegments(segments);
+      const labContent = serialize(segments, duration);
       const endpoint = labType === 'lab2'
         ? `/api/lab2/${recording.filename}`
         : `/api/lab/${recording.filename}`;
@@ -134,7 +138,7 @@ export function useLabelPersistence(
   );
 
   const saveAlgoLabel = useCallback(
-    async (segments: LabSegment[], reason: string, boundaryInfo?: any): Promise<boolean> => {
+    async (segments: LabSegment[], reason: string, boundaryInfo?: any, duration?: number): Promise<boolean> => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
@@ -143,7 +147,7 @@ export function useLabelPersistence(
       setIsSaving(true);
       setSaveStatus('saving');
 
-      const labContent = stringifyLabSegments(segments);
+      const labContent = serialize(segments, duration);
       try {
         const res = await fetch(`/api/lab_algo/${recording.filename}`, {
           method: 'POST',
@@ -172,7 +176,7 @@ export function useLabelPersistence(
 
   // 防抖自動存檔
   const triggerAutoSave = useCallback(
-    (getSegments: () => LabSegment[]) => {
+    (getSegments: () => LabSegment[], getDuration?: () => number) => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
       }
@@ -186,7 +190,7 @@ export function useLabelPersistence(
         setIsSaving(true);
         setSaveStatus('saving');
 
-        const labContent = stringifyLabSegments(segments);
+        const labContent = serialize(segments, getDuration?.());
         try {
           const res = await fetch(`/api/lab/${recording.filename}`, {
             method: 'POST',

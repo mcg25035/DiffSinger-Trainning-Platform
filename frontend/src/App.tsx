@@ -7,8 +7,22 @@ import { AudioSplitter } from './components/AudioSplitter';
 import { LabelEditor } from './components/LabelEditor';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
+import { TrainingManager } from './components/TrainingManager';
+import { InferenceStudio } from './components/InferenceStudio';
+import { SongSession } from './components/SongSession';
+import { AlignmentReview } from './components/AlignmentReview';
 import { useState, useCallback } from 'react';
 import './index.css';
+
+type Page = 'record' | 'sing' | 'align' | 'train' | 'inference';
+
+const PAGE_TITLES: Record<Page, string> = {
+  record: '錄音',
+  sing: '唱歌錄音',
+  align: '對齊處理',
+  train: '訓練管理',
+  inference: '推理 (開發中)',
+};
 
 function App() {
   const {
@@ -24,12 +38,18 @@ function App() {
     rawRecordings,
     uploadSegments,
     refreshRecordings,
-    refreshDevices
+    refreshDevices,
+    stopAndCaptureRecording,
+    cancelCapture
   } = useAudioMonitor();
 
+  const [page, setPage] = useState<Page>('record');
   const [selectedForSplit, setSelectedForSplit] = useState<Recording | null>(null);
   const [selectedForLabeling, setSelectedForLabeling] = useState<Recording | null>(null);
   const [isLabelFullscreen, setIsLabelFullscreen] = useState(false);
+  // 對齊設定(錄音側欄與唱歌錄音共用;建立 session 時存進 session,take 對齊用)
+  const [selectedDictId, setSelectedDictId] = useState('');
+  const [selectedAligner, setSelectedAligner] = useState('mfa');
 
   const handleAdopt = useCallback(() => {
     setSelectedForSplit(null);
@@ -100,7 +120,56 @@ function App() {
       
       <Header status={status} />
 
-      <div style={{ display: 'flex', flex: 1, gap: '32px', minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: '8px', margin: '16px 0' }}>
+        {(Object.keys(PAGE_TITLES) as Page[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPage(p)}
+            style={{
+              background: page === p ? '#2563eb' : '#1a1a1a',
+              color: page === p ? '#fff' : '#888',
+              border: '1px solid #333',
+              borderRadius: '10px',
+              padding: '8px 20px',
+              fontSize: '14px',
+              cursor: 'pointer',
+            }}
+          >
+            {PAGE_TITLES[p]}
+          </button>
+        ))}
+      </div>
+
+      {page === 'sing' && (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <SongSession
+            isRecording={isRecording}
+            canRecord={!!selectedDeviceId}
+            startRecording={startRecording}
+            stopAndCapture={stopAndCaptureRecording}
+            cancelCapture={cancelCapture}
+            dictionaryId={selectedDictId}
+            aligner={selectedAligner}
+          />
+        </div>
+      )}
+      {page === 'align' && (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <AlignmentReview />
+        </div>
+      )}
+      {page === 'train' && (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <TrainingManager recordings={uploadSegments.filter((r) => r.isChecked)} />
+        </div>
+      )}
+      {page === 'inference' && (
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <InferenceStudio />
+        </div>
+      )}
+
+      <div style={{ display: page === 'record' ? 'flex' : 'none', flex: 1, gap: '32px', minHeight: 0 }}>
         
         <div style={{ 
           flex: 2, 
@@ -192,6 +261,10 @@ function App() {
           onLabel={handleSetLabeling}
           onRefresh={refreshRecordings}
           activeFilename={selectedForLabeling?.filename || selectedForSplit?.filename}
+          selectedDictId={selectedDictId}
+          onDictChange={setSelectedDictId}
+          selectedAligner={selectedAligner}
+          onAlignerChange={setSelectedAligner}
         />
 
       </div>

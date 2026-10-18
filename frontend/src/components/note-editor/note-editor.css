@@ -1,0 +1,169 @@
+/* 原 svs-note-editor App.css，全部 scope 到 .note-editor-root（避免汙染平台全域樣式） */
+.note-editor-root { display: flex; flex-direction: column; height: 100%; min-height: 0; background: #14141c; color: #ddd; font-family: system-ui, sans-serif; }
+.note-editor-root .toolbar { display: flex; gap: 6px; align-items: center; padding: 7px 12px; background: #1b1b25; border-bottom: 1px solid #2e2e3a; user-select: none; }
+.note-editor-root .toolbar .vr { width: 1px; height: 22px; background: #33333f; margin: 0 6px; flex-shrink: 0; }
+.note-editor-root .toolbar label { display: flex; gap: 6px; align-items: center; font-size: 14px; color: #c6cbdc; white-space: nowrap; }
+.note-editor-root .toolbar input, .note-editor-root .toolbar select, .note-editor-root .toolbar button {
+  background: #262633; color: #e0e3ee; border: 1px solid #42424f; border-radius: 6px; padding: 5px 11px; font-size: 14px;
+}
+.note-editor-root .toolbar button { height: 32px; display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.note-editor-root .toolbar button:hover { background: #34344c; border-color: #565672; }
+.note-editor-root .toolbar button:disabled { opacity: .38; cursor: default; }
+.note-editor-root .toolbar button.active { background: #3a5185; border-color: #6a8cd8; color: #fff; }
+.note-editor-root .toolbar .ic-btn { width: 32px; padding: 0; justify-content: center; }
+.note-editor-root .toolbar .ic { display: block; flex-shrink: 0; }
+.note-editor-root .toolbar .grp { display: inline-flex; gap: 4px; align-items: center; }
+.note-editor-root .toolbar .menu-wrap { position: relative; display: inline-flex; }
+.note-editor-root .toolbar .menu-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; min-width: 265px;
+  background: #22222e; border: 1px solid #3e3e4e; border-radius: 9px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 11px; box-shadow: 0 10px 28px rgba(0, 0, 0, .55);
+}
+.note-editor-root .toolbar .menu-pop .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; color: #c6cbdc; }
+.note-editor-root .toolbar .menu-pop .row.sep { border-top: 1px solid #33333f; padding-top: 11px; }
+.note-editor-root .toolbar .menu-pop input[type="number"] { width: 62px; }
+.note-editor-root .toolbar .menu-pop input[type="range"] { width: 120px; accent-color: #ff9d3a; padding: 0; }
+.note-editor-root .toolbar .menu-pop input[type="checkbox"] { width: 15px; height: 15px; accent-color: #6a8cd8; margin: 0; }
+.note-editor-root .toolbar .chk input[type="checkbox"] { accent-color: #6a8cd8; margin: 0; }
+.note-editor-root input, .note-editor-root select, .note-editor-root button { background: #2a2a38; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; }
+.note-editor-root button { cursor: pointer; }
+.note-editor-root button:hover { background: #38384a; }
+.note-editor-root button.danger { background: #582222; border-color: #844; color: #f88; }
+.note-editor-root button.danger.icon { font-size: 15px; padding: 4px 10px; }
+.note-editor-root .word-input { width: 100%; font-size: 14px; padding: 6px 8px; background: #23232f; }
+.note-editor-root button.active { background: #3d5a99; border-color: #6a8cd8; color: #fff; }
+.note-editor-root button.close-btn { padding: 0 7px; line-height: 1.3; font-size: 14px; margin-left: auto; }
+.note-editor-root .grp { display: inline-flex; gap: 2px; }
+.note-editor-root .grp button { border-radius: 4px; }
+.note-editor-root .vr { width: 1px; height: 20px; background: #444; }
+.note-editor-root kbd { background: #2a2a38; border: 1px solid #555; border-radius: 3px; padding: 0 4px; font-size: 10px; }
+.note-editor-root .inline-edit { position: absolute; z-index: 5; font-size: 10px; padding: 1px 3px; height: 13px; background: #fff8e1; color: #111; border: 1px solid #ffb454; }
+.note-editor-root .roll.tool-pen { cursor: crosshair; }
+.note-editor-root .ph-head { display: flex; align-items: center; gap: 8px; }
+.note-editor-root .ph-head strong { flex: 1; }
+.note-editor-root .ph-head .muted { flex: 2; }
+.note-editor-root .ph-head .close-btn { margin-left: 0; }
+.note-editor-root .phoneme-editor label { display: block; margin-top: 8px; font-size: 13px; }
+.note-editor-root .spacer { flex: 1; }
+.note-editor-root .main { display: flex; flex: 1; min-height: 0; }
+.note-editor-root .piano-roll-wrap { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+.note-editor-root .roll-area { display: flex; flex-direction: column; flex: 1; min-height: 0; position: relative; }
+.note-editor-root .roll-body { display: flex; flex: 1; min-height: 0; }
+/* 時間尺規(點擊/拖曳 seek) */
+.note-editor-root .ruler { height: 20px; margin-left: 48px; overflow: hidden; position: relative; flex-shrink: 0; border-bottom: 1px solid #26262f; background: #14141c; cursor: pointer; user-select: none; }
+.note-editor-root .ruler-inner { position: absolute; top: 0; bottom: 0; left: 0; will-change: transform; }
+.note-editor-root .ruler-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid #4a4a5e; font-size: 12px; font-weight: 600; color: #c6cbdc; padding-left: 4px; line-height: 18px; pointer-events: none; }
+/* 全域播放指針(roll 一段 + F0 一段,同一時間位置;橘色) */
+.note-editor-root .playhead-overlay { position: absolute; top: 0; bottom: 0; left: 48px; right: 0; overflow: hidden; pointer-events: none; z-index: 6; }
+.note-editor-root .f0-editor { position: relative; }
+.note-editor-root .playhead-line { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: #ff7a1a; box-shadow: 0 0 5px rgba(255, 122, 26, .55); }
+/* 尺規上的倒三角播放頭標記:高=尺規 3/4(15px),1:1 方框=寬 15px,尖端對齊線中心 */
+.note-editor-root .ruler .playhead-line { pointer-events: none; }
+.note-editor-root .ruler .playhead-line::before { content: ''; position: absolute; top: 0; left: -6.5px; width: 0; height: 0; border-left: 7.5px solid transparent; border-right: 7.5px solid transparent; border-top: 15px solid #ff7a1a; filter: drop-shadow(0 0 4px rgba(255, 122, 26, .55)); }
+.note-editor-root .toolbar .play-ctl .time { font-size: 13px; color: #dfe3ee; font-variant-numeric: tabular-nums; min-width: 84px; text-align: center; align-self: center; font-weight: 600; }
+.note-editor-root .toolbar .play-ctl button:disabled { opacity: .38; cursor: default; }
+.note-editor-root .f0-toolbar .f0-toggle { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: #ccc; flex: none; }
+.note-editor-root .f0-toolbar .f0-toggle:hover { color: #fff; }
+.note-editor-root .keys-col { width: 48px; background: #1a1a24; overflow: hidden; flex-shrink: 0; }
+.note-editor-root .key-label { box-sizing: border-box; border-bottom: 1px solid #222; font-size: 9px; color: #888; text-align: right; padding-right: 4px; line-height: 12px; cursor: pointer; user-select: none; }
+.note-editor-root .key-label.black { background: #15151e; }
+.note-editor-root .key-label:hover { background: #2d2d40; }
+.note-editor-root .key-label.on { background: #ffb454; color: #0d1a26; font-weight: 700; }
+.note-editor-root .roll-scroll { overflow: auto; flex: 1; position: relative; min-width: 0; }
+.note-editor-root .roll { display: block; background: #17171f; touch-action: none; user-select: none; }
+.note-editor-root .phoneme-editor { width: 320px; border-left: 1px solid #333; padding: 10px; overflow-y: auto; flex-shrink: 0; background: #1a1a24; }
+.note-editor-root .phoneme-editor.empty { color: #777; }
+.note-editor-root .ph-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.note-editor-root .muted { color: #778; font-size: 11px; }
+.note-editor-root .ph-quick { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 8px; font-size: 12px; }
+.note-editor-root .ph-quick input { flex: 1 1 100%; }
+.note-editor-root .ph-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.note-editor-root .ph-table td, .note-editor-root .ph-table th { border-bottom: 1px solid #2a2a36; padding: 2px 4px; }
+.note-editor-root .ph-table input { width: 100%; }
+.note-editor-root .ph-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+/* phoneme 比例條 */
+.note-editor-root .ph-split-bar { display: flex; height: 20px; border-radius: 4px; overflow: hidden; margin: 8px 0 4px; background: #23232f; }
+.note-editor-root .ph-seg { display: flex; align-items: center; justify-content: center; font-size: 11px; color: #dfe6ff;
+  background: #3a5aa0; border-right: 1px solid #1a1a24; overflow: hidden; white-space: nowrap; }
+.note-editor-root .ph-seg:nth-child(even) { background: #2e7d6b; }
+.note-editor-root .ph-bound { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+.note-editor-root .ph-bound input[type=range] { flex: 1; accent-color: #7ab8ff; }
+.note-editor-root .f0-editor { border-top: 1px solid #333; background: #1a1a24; }
+.note-editor-root .f0-toolbar { display: flex; gap: 14px; align-items: center; padding: 5px 12px; user-select: none; }
+.note-editor-root .f0-toolbar strong { font-size: 14px; color: #dfe3ee; }
+/* 收合時狀態提示淡出(不卸載,保留版位,禁點) */
+.note-editor-root .f0-tools { display: inline-flex; gap: 14px; align-items: center; min-width: 0; opacity: 1; transition: opacity .25s ease; }
+.note-editor-root .f0-tools.off { opacity: 0; pointer-events: none; }
+/* 收合序列:先轉勾+淡出/淡入(.25s),-height 延遲 .25s 才開始沉/浮 */
+.note-editor-root .f0-scroll { overflow: hidden; min-width: 0; max-height: 260px; opacity: 1; transition: max-height .3s ease .25s, opacity .25s ease; user-select: none; } /* 只當 roll 的放大鏡:不可自己捲,scrollLeft 由 JS 跟 roll 對齊 */
+.note-editor-root .f0-scroll.closed { max-height: 0; opacity: 0; }
+.note-editor-root .f0-scroll svg { display: block; background: #17171f; }
+.note-editor-root .preview-modal { position: fixed; inset: 0; background: #000a; display: flex; align-items: center; justify-content: center; z-index: 10; }
+.note-editor-root .preview-modal pre { background: #20202c; padding: 16px; max-width: 80vw; max-height: 80vh; overflow: auto; border-radius: 8px; font-size: 11px; }
+/* 推論等待:雙緞帶波 = 單波長瓷磚 repeat-x + CSS transform 流動(GPU 合成,不重點陣);
+   亮帶 = 亮版分身 × 羽化 mask 窗(只有圖形本體亮,空白處不亮),窗掃「可視寬」並跟隨 scrollLeft */
+.note-editor-root .wave-ribbon {
+  position: absolute; pointer-events: none; background-repeat: repeat-x;
+  animation: wave-flow 4.5s linear infinite; will-change: transform;
+}
+@keyframes wave-flow { to { transform: translateX(96px); } }
+.note-editor-root .wave-glow-win {
+  position: absolute; pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  animation: wave-band-sweep 4.5s linear infinite; will-change: transform;
+}
+.note-editor-root .wave-glow-counter { position: absolute; inset: 0; animation: wave-band-unsweep 4.5s linear infinite; will-change: transform; }
+@keyframes wave-band-sweep { from { transform: translateX(-101%); } to { transform: translateX(101%); } }
+@keyframes wave-band-unsweep { from { transform: translateX(101%); } to { transform: translateX(-101%); } }
+
+/* 琴音音量滑桿 */
+.note-editor-root .keyvol { display: inline-flex; align-items: center; gap: 6px; color: #99a; font-size: 12px; }
+.note-editor-root .keyvol input[type="range"] { width: 90px; accent-color: #ffb454; }
+
+/* F0 圖例 + 右鍵選單 */
+.note-editor-root .legend { display: inline-flex; gap: 12px; font-size: 14px; color: #c6cbdc; align-items: center; }
+.note-editor-root .legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.note-editor-root .legend .dot.auto { background: #ff7ab8; }
+.note-editor-root .legend .dot.man { background: #e0418c; box-shadow: 0 0 0 1.5px #fff; }
+.note-editor-root .legend .cross { color: #8a8a96; font-style: normal; font-weight: 700; margin-right: 3px; }
+.note-editor-root .hints { display: inline-flex; gap: 14px; align-items: center; font-size: 14px; color: #b9bfce; }
+.note-editor-root .hints .hint { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; }
+.note-editor-root .hints .hint .ic { opacity: .85; }
+.note-editor-root .hints .x2 { font-style: normal; font-size: 10px; margin-left: -3px; align-self: flex-start; color: #c3c8d4; }
+.note-editor-root .hints .hint kbd { font-size: 10px; padding: 1px 5px; }
+/* HUD 點燈:實體按鍵/滑鼠按下 = 該提示亮 */
+.note-editor-root .hints .hint { position: relative; }
+.note-editor-root .hints .hint.on { color: #9fd8ff; }
+.note-editor-root .hints .hint.on .x2 { color: #9fd8ff; } /* 雙擊完成:x2 也要跟著亮 */
+.note-editor-root .hints .hint .mic.lit { color: #9fd8ff; } /* 按住左鍵:只有滑鼠 icon 亮 */
+.note-editor-root .hints .hint.half { color: #c2ddec; } /* hover 半亮(備用) */
+.note-editor-root .hints .hint .rdot.lit .ic .ws { fill: #fff; } /* hover 可開選單的目標:白標記填色亮(F0=圓/roll=方) */
+/* Piano Roll 提示:浮在 scroll 底(捲軸上方、琴鍵右側)的短 chip,不吃一整 row */
+.note-editor-root .f0-stack { position: relative; }
+.note-editor-root .roll-hints { position: absolute; bottom: calc(100% + 15px); left: 56px; z-index: 12; display: flex; align-items: center; padding: 4px 12px; background: rgba(22,22,31,.94); border: 1px solid #2a2a38; border-radius: 8px; user-select: none; box-shadow: 0 -4px 12px rgba(0,0,0,.35); }
+.note-editor-root .roll-hints .hints { color: #a7adbd; }
+.note-editor-root .hints .hint.on .ic { opacity: 1; }
+.note-editor-root .hints .hint.on kbd { background: #9fd8ff; border-color: #9fd8ff; color: #10131a; }
+.note-editor-root .hints .hint.on kbd.sub { background: #2a2a38; border-color: #555; color: #ddd; } /* 子鍵(Shift)不被整顆點燈帶著亮 */
+.note-editor-root .hints .hint.on kbd.sub.on { background: #9fd8ff; border-color: #9fd8ff; color: #10131a; } /* 但 Ctrl+Shift 同按時 Shift 還是要亮 */
+.note-editor-root .hints .hint kbd.on { background: #9fd8ff; border-color: #9fd8ff; color: #10131a; } /* 單顆 kbd 點燈(如 Shift) */
+.note-editor-root .hints .hint .subtxt { color: #8a8a96; }
+.note-editor-root .hints .hint .subtxt.on { color: #9fd8ff; } /* 括號+說明字跟著子鍵(Shift)一起亮:只有暗/亮兩態,不漸變 */
+/* 左鍵 ×2 combo 底線:提示框底下,一下半條、雙擊全條(淺藍) */
+.note-editor-root .hints .hint .combo { position: absolute; left: 4px; right: 4px; bottom: -4px; height: 3px; border-radius: 2px; background: #2c3340; overflow: hidden; pointer-events: none; }
+.note-editor-root .hints .hint .combo::before { content: ''; display: block; height: 100%; width: 0; background: #8fd0ff; transition: width .1s; }
+.note-editor-root .hints .hint .combo[data-c="1"]::before { width: 50%; }
+.note-editor-root .hints .hint .combo[data-c="2"]::before { width: 100%; }
+.note-editor-root .f0-ctxmenu { position: fixed; z-index: 3000; background: #20202c; border: 1px solid #444; border-radius: 8px; padding: 4px; min-width: 170px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+.note-editor-root .f0-ctxmenu button { display: block; width: 100%; text-align: left; background: none; border: none; color: #ddd; font-size: 12px; padding: 6px 10px; border-radius: 5px; cursor: pointer; }
+.note-editor-root .f0-ctxmenu button:hover { background: #2d2d40; }
+
+/* 音符右鍵選單(與 F0 共用樣式) */
+.note-editor-root .note-ctxmenu { position: fixed; z-index: 3000; background: #20202c; border: 1px solid #444; border-radius: 8px; padding: 6px; min-width: 180px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+.note-editor-root .note-ctxmenu button { display: block; width: 100%; text-align: left; background: none; border: none; color: #ddd; font-size: 13px; padding: 8px 12px; border-radius: 5px; cursor: pointer; }
+.note-editor-root .note-ctxmenu button:hover { background: #2d2d40; }
+.note-editor-root .note-ctxmenu .sep { height: 1px; background: #3a3a48; margin: 4px 6px; }
+.note-editor-root .note-ctxmenu .danger { color: #ff7a7a; }

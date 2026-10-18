@@ -107,7 +107,7 @@ export function mergeConfidenceScores(
 }
 
 /**
- * 填補空隙：在 segments 之間插入 '!' 標記（未確認區間）
+ * 填補空隙：在 segments 之間插入 'br' 標記（呼吸音,不能有沒音素的區間）
  */
 export function fillGaps(segments: LabSegment[], duration: number): LabSegment[] {
   const sorted = [...segments].sort((a, b) => a.start - b.start);
@@ -117,14 +117,14 @@ export function fillGaps(segments: LabSegment[], duration: number): LabSegment[]
 
   sorted.forEach((seg) => {
     if (seg.start - currentPos > eps) {
-      filled.push({ start: currentPos, end: seg.start, label: '!' });
+      filled.push({ start: currentPos, end: seg.start, label: 'br' });
     }
     filled.push(seg);
     currentPos = Math.max(currentPos, seg.end);
   });
 
   if (duration - currentPos > eps) {
-    filled.push({ start: currentPos, end: duration, label: '!' });
+    filled.push({ start: currentPos, end: duration, label: 'br' });
   }
 
   return filled;

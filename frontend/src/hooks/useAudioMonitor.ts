@@ -123,6 +123,12 @@ export function useAudioMonitor() {
 
             sourceNodeRef.current.connect(newAnalyser);
             sourceNodeRef.current.connect(processorNodeRef.current);
+            // ScriptProcessorNode 必須接上 destination 才會觸發 onaudioprocess
+            // (Firefox 不會對未接通的 processor 開火)。接 gain=0 維持靜音、避免回放自己的麥克風。
+            const silentGain = audioContextRef.current.createGain();
+            silentGain.gain.value = 0;
+            processorNodeRef.current.connect(silentGain);
+            silentGain.connect(audioContextRef.current.destination);
         } catch (err) { console.error("Monitor Fail:", err); }
     }, []); // No dependency on isRecording
 
@@ -160,6 +166,28 @@ export function useAudioMonitor() {
         await fetch('/upload', { method: 'POST', body: formData });
         fetchRecordings();
         setStatus({ text: "錄音已上傳", color: "green" });
+    };
+
+    // 停止錄音但不直接上傳，回傳 WAV Blob 交由呼叫端處理（新歌唱流程用）
+    const stopAndCaptureRecording = async (): Promise<Blob | null> => {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+
+        if (pcmChunksRef.current.length === 0) {
+            setStatus({ text: "未採集到音訊", color: "red" });
+            return null;
+        }
+
+        const wavBlob = encodeWAV([...pcmChunksRef.current], sampleRateRef.current);
+        setStatus({ text: "錄音完成，待確認", color: "blue" });
+        return wavBlob;
+    };
+
+    const cancelCapture = () => {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        pcmChunksRef.current = [];
+        setStatus({ text: "已取消", color: "green" });
     };
 
     const uploadFile = async (file: File) => {
@@ -239,6 +267,7 @@ export function useAudioMonitor() {
         devices, selectedDeviceId, setSelectedDeviceId,
         analyser,
         status, isRecording, startRecording, stopAndUploadRecording, uploadFile,
+        stopAndCaptureRecording, cancelCapture,
         rawRecordings, uploadSegments,
         refreshRecordings: fetchRecordings,
         refreshDevices: getDevices

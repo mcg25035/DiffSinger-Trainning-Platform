@@ -60,8 +60,8 @@ export function PhonemeEditPanel({
         onKeyDown={(e) => {
           if (e.key === 'Enter') onUpdate();
           if (e.key === 'Escape') onDeselect();
-          // Quick-replace shortcuts when phoneme is "!"
-          if (editLabel === '!' && (e.key === '1' || e.key === '2')) {
+          // Quick-replace shortcuts when phoneme is "!" or "br" (gap)
+          if ((editLabel === '!' || editLabel === 'br') && (e.key === '1' || e.key === '2')) {
             e.preventDefault();
             const replacement = e.key === '1' ? 'br' : 'pau';
             onEditLabelChange(replacement);

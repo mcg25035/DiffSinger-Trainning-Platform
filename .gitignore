@@ -58,3 +58,12 @@ dev.log
 /scripts/simple_closure_vowel_aligner.py
 /scripts/test_p1001_golden_baseline.py
 /scripts/test_p1042.py
+
+# 歌詞先行錄音 session 資料
+sessions
+
+# local-infer 建置暫存(build.sh 重新生成,不入庫)
+local-infer/repo-src/
+
+# 專題報告 PDF/ODT 二進位(太大)
+docs-all/

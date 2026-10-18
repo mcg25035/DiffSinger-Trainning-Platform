@@ -20,6 +20,10 @@ const createTranscriptionRouter = require('./routes/transcription');
 const createMmsRouter = require('./routes/mms');
 const createSegmentsRouter = require('./routes/segments');
 const createSegmentationRouter = require('./routes/segmentation');
+const createSongSessionService = require('./services/song-session');
+const createSongSessionRouter = require('./routes/song-session');
+const createTrainRouter = require('./routes/train');
+const createInferenceRouter = require('./routes/inference');
 
 const app = express();
 require('dotenv').config();
@@ -77,6 +81,13 @@ app.use(createMmsRouter({
     trainingEnabled: false,
 }));
 app.use(createSegmentationRouter({ segmentsDir, segmentationService, segmentationCache }));
+const songSessionService = createSongSessionService({
+    fs, path, rootDir: __dirname, segmentsDir, mappingsDir, lyricsService,
+    submitAlignment, jobs, mapRomajiToPhonemes,
+});
+app.use(createSongSessionRouter({ sessionService: songSessionService, segmentsDir, mmsService }));
+app.use(createTrainRouter({ segmentsDir }));
+app.use(createInferenceRouter());
 app.use(createSegmentsRouter({
     uploadsDir, segmentsDir, jobs,
     defaultAlgoDir: path.join(__dirname, 'projects', 'attention-labeler', 'data', 'algo'),

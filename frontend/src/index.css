@@ -54,3 +54,43 @@ audio {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+@keyframes ds-indeterminate {
+  0% { left: -40%; width: 40%; }
+  60% { left: 100%; width: 40%; }
+  100% { left: 100%; width: 40%; }
+}
+
+@keyframes coltrain-shimmer {
+  0%   { transform: translateY(-110%) skewY(-14deg); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateY(200%) skewY(-14deg); opacity: 0; }
+}
+
+.coltrain-shimmer-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 1;
+}
+
+.coltrain-shimmer-overlay::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 55%;
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(147, 197, 253, 0.10) 30%,
+    rgba(96, 165, 250, 0.34) 50%,
+    rgba(147, 197, 253, 0.10) 70%,
+    transparent 100%
+  );
+  animation: coltrain-shimmer 1.6s ease-in-out infinite;
+}

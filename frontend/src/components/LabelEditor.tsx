@@ -175,7 +175,10 @@ export function LabelEditor({
     persistence.setIsDirty(true);
     persistence.setSaveStatus('idle');
     if (!hasLab2Ref.current) {
-      persistence.triggerAutoSave(() => regionMgr.getCurrentSegments());
+      persistence.triggerAutoSave(
+        () => regionMgr.getCurrentSegments(),
+        () => wavesurfer.wavesurferRef.current?.getDuration() ?? 0
+      );
     }
   });
 
@@ -549,15 +552,19 @@ export function LabelEditor({
       return;
     }
 
-    const ok = await persistence.saveLabels(regionMgr.getCurrentSegments());
+    const ws = wavesurfer.wavesurferRef.current;
+    const duration = ws ? ws.getDuration() : 0;
+    const ok = await persistence.saveLabels(regionMgr.getCurrentSegments(), 'lab', duration);
     if (!ok) {
       alert('Save failed');
     }
-  }, [regionMgr, persistence]);
+  }, [regionMgr, persistence, wavesurfer.wavesurferRef]);
 
   const handleConfirmSaveAlgo = useCallback(async (reason: string) => {
+    const ws = wavesurfer.wavesurferRef.current;
+    const duration = ws ? ws.getDuration() : 0;
     const segments = regionMgr.getCurrentSegments();
-    const ok = await persistence.saveAlgoLabel(segments, reason, activeBoundaryInfo);
+    const ok = await persistence.saveAlgoLabel(segments, reason, activeBoundaryInfo, duration);
     if (ok) {
       setIsReasonModalOpen(false);
       const bndTag = activeBoundaryInfo ? `【${activeBoundaryInfo.phonemeBefore} | ${activeBoundaryInfo.phonemeAfter}】` : '';
@@ -672,7 +679,7 @@ export function LabelEditor({
     onArrowLeft: handleSelectPrevPhoneme,
     onArrowRight: handleSelectNextPhoneme,
     onQuickReplace: (replacement) => {
-      if (regionMgr.selectedSegment && regionMgr.editLabel === '!') {
+      if (regionMgr.selectedSegment && (regionMgr.editLabel === '!' || regionMgr.editLabel === 'br')) {
         regionMgr.setEditLabel(replacement);
         regionMgr.updateLabel(replacement);
       }

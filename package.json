@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test --test-concurrency=1 tests/routes-differential.test.js tests/alignment-runtime.test.js tests/mms-training.test.js tests/segmentation-cache.test.js tests/segmentation-routes.test.js"
+    "test": "node --test --test-concurrency=1 tests/routes-differential.test.js tests/alignment-runtime.test.js tests/mms-training.test.js tests/segmentation-cache.test.js tests/segmentation-routes.test.js tests/mora-split.test.js"
   },
   "keywords": [],
   "author": "",

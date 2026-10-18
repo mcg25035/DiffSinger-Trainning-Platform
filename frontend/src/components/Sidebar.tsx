@@ -13,15 +13,17 @@ interface SidebarProps {
   onLabel: (rec: Recording) => void;
   onRefresh: () => void;
   activeFilename?: string;
+  selectedDictId: string;
+  onDictChange: (id: string) => void;
+  selectedAligner: string;
+  onAlignerChange: (a: string) => void;
 }
 
-export const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefresh, activeFilename }: SidebarProps) => {
+export const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, onRefresh, activeFilename, selectedDictId, onDictChange, selectedAligner, onAlignerChange }: SidebarProps) => {
   const [dictionaries, setDictionaries] = useState<Dictionary[]>([]);
-  const [selectedDictId, setSelectedDictId] = useState<string>('');
   const [showLyricsManager, setShowLyricsManager] = useState(false);
   const [showMappingManager, setShowMappingManager] = useState(false);
   const [showMmsTraining, setShowMmsTraining] = useState(false);
-  const [selectedAligner, setSelectedAligner] = useState<string>('mfa');
 
   // Batch recognition state
   const [showBatchDialog, setShowBatchDialog] = useState(false);
@@ -39,8 +41,9 @@ export const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, 
       .then(res => res.json())
       .then(data => {
         setDictionaries(data);
-        if (data.length > 0) setSelectedDictId(data[0].id);
+        if (data.length > 0 && !selectedDictId) onDictChange(data[0].id);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedDict = dictionaries.find(d => d.id === selectedDictId);
@@ -253,7 +256,7 @@ export const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, 
             <label style={{ fontSize: '11px', color: '#888', fontWeight: '900', letterSpacing: '1px' }}>VALIDATION LANGUAGE</label>
             <select 
               value={selectedDictId} 
-              onChange={e => setSelectedDictId(e.target.value)}
+              onChange={e => onDictChange(e.target.value)}
               style={{ background: '#111', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '8px', fontSize: '12px', outline: 'none', width: '100%' }}
             >
               {dictionaries.map(d => (
@@ -266,7 +269,7 @@ export const Sidebar = memo(({ rawRecordings, uploadSegments, onSplit, onLabel, 
             <label style={{ fontSize: '11px', color: '#888', fontWeight: '900', letterSpacing: '1px' }}>ALIGNMENT METHOD</label>
             <select 
               value={selectedAligner} 
-              onChange={e => setSelectedAligner(e.target.value)}
+              onChange={e => onAlignerChange(e.target.value)}
               style={{ background: '#111', border: '1px solid #444', borderRadius: '8px', color: '#fff', padding: '8px', fontSize: '12px', outline: 'none', width: '100%' }}
             >
               <option value="mfa">MFA (Montreal)</option>

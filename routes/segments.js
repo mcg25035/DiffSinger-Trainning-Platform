@@ -161,7 +161,7 @@ module.exports = function createSegmentsRouter({ uploadsDir, segmentsDir, jobs, 
             .map(f => ({ filename: f, type: 'raw' }));
 
         const segmentFiles = fs.readdirSync(segmentsDir)
-            .filter(f => f.endsWith('.wav'))
+            .filter(f => f.endsWith('.wav') && !f.startsWith('take-')) // take-* 是唱歌錄音流程的暫存檔
             .map(f => {
                 const txtFile = f.replace(/\.wav$/, '.txt');
                 const labFile = f.replace(/\.wav$/, '.lab');
