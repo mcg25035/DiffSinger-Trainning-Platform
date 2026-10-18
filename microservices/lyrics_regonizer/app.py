@@ -16,61 +16,78 @@ app = FastAPI(title="SenseVoice Hiragana API")
 # Global model variable
 model = None
 
+# kana mora → romaji 對照表(純資料;與 mms romanizer 的 KANA_TO_ROMAJI、
+# Node romaji-mora.js 的 trie 輸出慣例同步:ん→'n'、促音→'cl')
+KANA_MORA_TO_ROMAJI = {
+    "あ": "a", "い": "i", "う": "u", "え": "e", "お": "o",
+    "か": "ka", "き": "ki", "く": "ku", "け": "ke", "こ": "ko",
+    "さ": "sa", "し": "shi", "す": "su", "せ": "se", "そ": "so",
+    "た": "ta", "ち": "chi", "つ": "tsu", "て": "te", "と": "to",
+    "な": "na", "に": "ni", "ぬ": "nu", "ね": "ne", "の": "no",
+    "は": "ha", "ひ": "hi", "ふ": "fu", "へ": "he", "ほ": "ho",
+    "ま": "ma", "み": "mi", "む": "mu", "め": "me", "も": "mo",
+    "や": "ya", "ゆ": "yu", "よ": "yo",
+    "ら": "ra", "り": "ri", "る": "ru", "れ": "re", "ろ": "ro",
+    "わ": "wa", "を": "wo", "ん": "n",
+    "が": "ga", "ぎ": "gi", "ぐ": "gu", "げ": "ge", "ご": "go",
+    "ざ": "za", "じ": "ji", "ず": "zu", "ぜ": "ze", "ぞ": "zo",
+    "だ": "da", "ぢ": "ji", "づ": "zu", "で": "de", "ど": "do",
+    "ば": "ba", "び": "bi", "ぶ": "bu", "べ": "be", "ぼ": "bo",
+    "ぱ": "pa", "ぴ": "pi", "ぷ": "pu", "ぺ": "pe", "ぽ": "po",
+    "きゃ": "kya", "きゅ": "kyu", "きょ": "kyo",
+    "しゃ": "sha", "しゅ": "shu", "しょ": "sho",
+    "ちゃ": "cha", "ちゅ": "chu", "ちょ": "cho",
+    "にゃ": "nya", "にゅ": "nyu", "にょ": "nyo",
+    "ひゃ": "hya", "ひゅ": "hyu", "ひょ": "hyo",
+    "みゃ": "mya", "みゅ": "myu", "みょ": "myo",
+    "りゃ": "rya", "りゅ": "ryu", "りょ": "ryo",
+    "ぎゃ": "gya", "ぎゅ": "gyu", "ぎょ": "gyo",
+    "じゃ": "ja", "じゅ": "ju", "じょ": "jo",
+    "びゃ": "bya", "びゅ": "byu", "びょ": "byo",
+    "ぴゃ": "pya", "ぴゅ": "pyu", "ぴょ": "pyo",
+    "ふぁ": "fa", "ふぃ": "fi", "ふぇ": "fe", "ふぉ": "fo",
+    "うぃ": "wi", "うぇ": "we", "うぉ": "wo",
+    "てぃ": "ti", "でぃ": "di", "とぅ": "tu", "どぅ": "du",
+    "しぇ": "she", "じぇ": "je", "ちぇ": "che",
+}
+_SMALL_TO_BIG = {"ぁ": "あ", "ぃ": "い", "ぅ": "う", "ぇ": "え", "ぉ": "お",
+                 "ゃ": "や", "ゅ": "ゆ", "ょ": "よ", "ゎ": "わ"}
+
+def kana_to_morae(kana: str):
+    """kana → romaji mora 序列。kana 的切分(ゃゅょ/っ)完全無歧義,
+    不需要 romaji 切分器(hepburn 連續字串的歧義是它自己造成的)。"""
+    out, i = [], 0
+    while i < len(kana):
+        c = kana[i]
+        if c == "ー":
+            i += 1; continue  # 長音符號併入前音
+        if c == "っ":
+            out.append("cl"); i += 1; continue
+        if i + 1 < len(kana) and kana[i + 1] in _SMALL_TO_BIG and (c + kana[i + 1]) in KANA_MORA_TO_ROMAJI:
+            out.append(KANA_MORA_TO_ROMAJI[c + kana[i + 1]]); i += 2; continue
+        if c in _SMALL_TO_BIG:  # 獨立小書字(如「ネェ」的 ぇ)
+            c = _SMALL_TO_BIG[c]
+        out.append(KANA_MORA_TO_ROMAJI.get(c, c))
+        i += 1
+    return out
+
 def convert_text(text):
+    """ASR 輸出(日文/混漢字)→ (hiragana, romaji morae text)。
+    pykakasi 拿 item['hira'](kana)→ trivial mora 切分 → 資料表轉回
+    mora 序列(與歌詞側 Node 產生的 token 同慣例)。"""
     kks = pykakasi.kakasi()
     result = kks.convert(text)
-    
-    # 1. Process Hiragana
+
+    # 1. Hiragana(顯示/除錯用)
     hira = "".join([item['hira'] for item in result])
     hira = re.sub(r'[^\u3040-\u309F]', '', hira)
-    
-    # 2. Process Romaji into syllables
-    def split_romaji(s):
-        res = []
-        i = 0
-        while i < len(s):
-            # Skip spaces and common punctuation
-            if s[i].isspace() or s[i] in ".,!?;:\"'-":
-                i += 1
-                continue
-                
-            # Nasal 'n' (ん)
-            if s[i] == 'n':
-                is_nasal = False
-                if i + 1 == len(s):
-                    is_nasal = True
-                elif s[i+1] not in 'aiueo' and s[i+1] != 'y':
-                    is_nasal = True
-                
-                if is_nasal:
-                    res.append('N')
-                    i += 1
-                    continue
 
-            # Consonant(s) + vowel (e.g., 'ka', 'kyu', 'shi', 'chi', 'tsu')
-            match = re.match(r'^([bdfghjklmnprstvwzy]*[aiueo])', s[i:])
-            if match:
-                syll = match.group(1)
-                res.append(syll)
-                i += len(syll)
-            else:
-                # Doubled consonants (っ) or individual characters
-                if i + 1 < len(s) and s[i] == s[i+1] and s[i] not in 'aiueo':
-                    res.append(s[i])
-                    i += 1
-                else:
-                    res.append(s[i])
-                    i += 1
-        return res
-
-    all_syllables = []
+    # 2. kana → mora → romaji(空白分隔,直接就是 mora 序列)
+    morae = []
     for item in result:
-        # Use hepburn romaji
-        r = item['hepburn']
-        all_syllables.extend(split_romaji(r))
-    
-    romaji_text = " ".join(all_syllables)
-    return hira, romaji_text
+        morae.extend(kana_to_morae(item['hira']))
+
+    return hira, " ".join(morae)
 
 def match_romaji_to_lyrics(rough_romaji: str, full_lyrics_romaji: str):
     def clean_and_split(text):

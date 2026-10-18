@@ -19,6 +19,13 @@ import numpy as np
 # Landmark-based boundary refinement (PanPhon features + Auto-Landmark detection)
 from landmark_refinement import refine_boundaries_with_landmarks
 
+# 漢字×羅馬拼音 mora 消歧(KANJIDIC2 + 可選 sudachi)
+try:
+    from romanizer import romanize_line
+except Exception as _e:
+    romanize_line = None
+    logging.getLogger("mms_service").warning(f"romanizer unavailable: {_e}")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -1322,3 +1329,100 @@ async def stop_training():
             return {"status": "success", "message": "Training stop requested."}
         else:
             return {"status": "success", "message": "No active training session to stop."}
+
+# ───────────────────── 歌詞消歧:日文 + romaji → mora-exact romaji ─────────────────────
+
+def _romanize_item(item):
+    """Pool worker 用(必須 module-level 才能被 pickle 參照)。"""
+    if not isinstance(item, dict):
+        return {"error": "invalid item"}
+    try:
+        return romanize_line(item.get("kanji") or "", item.get("romaji") or "")
+    except Exception as e:
+        return {"error": str(e)}
+
+def _romanize_lines(lines, progress_cb=None):
+    """逐行轉換。行數 ≥ 3 時用 fork Pool 平行:每行互相獨立,結果與序列處理
+    完全相同;parent 先載 kanjidic cache,fork 後 worker 經 COW 共享,免重解析。
+    平行路徑只有行級進度(progress_cb(i, frac));< 3 行走序列,保留每個
+    parse 的細粒度進度(單行 = 整首歌時才看得到真進度)。"""
+    total = max(len(lines), 1)
+    results = [None] * len(lines)
+    if len(lines) >= 3:
+        from romanizer import load_kanjidic
+        load_kanjidic()
+        import multiprocessing as mp
+        ctx = mp.get_context("fork")
+        with ctx.Pool(processes=min(len(lines), os.cpu_count() or 4)) as pool:
+            for i, r in enumerate(pool.imap(_romanize_item, lines)):
+                results[i] = r
+                if progress_cb:
+                    progress_cb(i, (i + 1) / total)
+    else:
+        for i, item in enumerate(lines):
+            if not isinstance(item, dict):
+                results[i] = {"error": "invalid item"}
+            else:
+                try:
+                    def cb(frac, _i=i):
+                        progress_cb(_i, (_i + frac) / total)
+                    results[i] = romanize_line(item.get("kanji") or "", item.get("romaji") or "",
+                                               progress_cb=progress_cb and cb)
+                except Exception as e:
+                    results[i] = {"error": str(e)}
+    return results
+
+@app.post("/romanize_mora")
+async def romanize_mora(payload: Dict[Any, Any]):
+    """
+    輸入: { "lines": [ { "kanji": "...", "romaji": "..." }, ... ] }
+    輸出: { "results": [ { kana, mora_romaji, morae, mora_sources, score, warning? } ] }
+
+    kanji 可省略/空字串 → 退回純規則切分。
+    """
+    if romanize_line is None:
+        raise HTTPException(status_code=503, detail="romanizer unavailable (missing deps)")
+    lines = payload.get("lines") or []
+    return {"results": _romanize_lines(lines)}
+
+# ───────────────────── 消歧轉換 job(真進度:逐 parse 逐行回報)─────────────────────
+
+romanize_jobs = {}
+romanize_jobs_lock = threading.Lock()
+
+def _run_romanize_job(job_id, lines):
+    try:
+        total = max(len(lines), 1)
+        def progress_cb(i, frac):
+            with romanize_jobs_lock:
+                romanize_jobs[job_id]["progress"] = min(0.999, frac)
+                romanize_jobs[job_id]["stage"] = f"第 {i + 1}/{total} 行"
+        results = _romanize_lines(lines, progress_cb=progress_cb)
+        with romanize_jobs_lock:
+            romanize_jobs[job_id].update({
+                "status": "completed", "progress": 1.0,
+                "stage": "完成", "result": {"results": results},
+            })
+    except Exception as e:
+        with romanize_jobs_lock:
+            romanize_jobs[job_id].update({"status": "error", "error": str(e)})
+
+@app.post("/romanize_mora_async")
+async def romanize_mora_async(payload: Dict[Any, Any]):
+    """啟動消歧轉換 job,回 jobId;用 /romanize_mora_status/{id} 輪詢真進度。"""
+    if romanize_line is None:
+        raise HTTPException(status_code=503, detail="romanizer unavailable (missing deps)")
+    lines = payload.get("lines") or []
+    job_id = uuid.uuid4().hex
+    with romanize_jobs_lock:
+        romanize_jobs[job_id] = {"status": "running", "progress": 0.0, "stage": "排隊中", "result": None, "error": None}
+    threading.Thread(target=_run_romanize_job, args=(job_id, lines), daemon=True).start()
+    return {"jobId": job_id}
+
+@app.get("/romanize_mora_status/{job_id}")
+async def romanize_mora_status(job_id: str):
+    with romanize_jobs_lock:
+        job = romanize_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="job not found")
+        return dict(job)

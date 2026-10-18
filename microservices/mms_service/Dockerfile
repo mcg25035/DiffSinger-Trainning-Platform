@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Copy requirements and install
 COPY requirements.txt .
-RUN pip install --no-cache-dir fastapi uvicorn python-multipart numpy
+RUN pip install --no-cache-dir fastapi uvicorn python-multipart numpy sudachipy sudachidict_core pykakasi
 
 # Install matching torchaudio version
 ARG TORCHAUDIO_VERSION=2.1.2

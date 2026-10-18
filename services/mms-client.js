@@ -136,4 +136,36 @@ async function stopTraining() {
     return response.data;
 }
 
-module.exports = { alignBatch, train, getStatus, getDictionary, healthCheck, deleteModel, reloadModel, stopTraining };
+/** 日文 + romaji → mora-exact romaji(漢字讀音消歧)— 同步(舊) */
+async function romanizeMora(lines) {
+    const response = await mmsClient.request({
+        method: 'POST',
+        url: '/romanize_mora',
+        data: { lines },
+        timeout: 60000,
+    });
+    return response.data;
+}
+
+/** 啟動消歧 job(真進度) */
+async function romanizeMoraAsync(lines) {
+    const response = await mmsClient.request({
+        method: 'POST',
+        url: '/romanize_mora_async',
+        data: { lines },
+        timeout: 10000,
+    });
+    return response.data;
+}
+
+/** 輪詢消歧 job 狀態 */
+async function romanizeMoraStatus(jobId) {
+    const response = await mmsClient.request({
+        method: 'GET',
+        url: `/romanize_mora_status/${jobId}`,
+        timeout: 10000,
+    });
+    return response.data;
+}
+
+module.exports = { alignBatch, train, getStatus, getDictionary, healthCheck, deleteModel, reloadModel, stopTraining, romanizeMora, romanizeMoraAsync, romanizeMoraStatus };
