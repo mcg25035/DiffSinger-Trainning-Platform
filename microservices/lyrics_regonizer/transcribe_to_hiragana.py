@@ -4,6 +4,8 @@ from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 import pykakasi
 
+from romaji_lattice import romaji_parses
+
 def convert_text(text):
     kks = pykakasi.kakasi()
     result = kks.convert(text)
@@ -14,44 +16,13 @@ def convert_text(text):
     
     # 2. Process Romaji into syllables
     # 羅馬拼音音拍 lattice(Trie/FSM 分支窮舉,保守解在前;與 mms romanizer 同規則)
-    # 轉移規則:onset+(y?)V 先試(含 n+母音=保守結合);n → 'N'(撥音,與 n+母音歧義);
-    # 子音無母音可接 → 促音(tte → t+te;保留原慣例:吐單一子音字元)
+    # DFS 引擎與轉移規則在 romaji_lattice.py;這裡只給本腳本的細項條件:
+    # 音節原樣輸出(無 alias)、撥音 'N'、促音 fallback 吐原子音字元
     def split_romaji(s):
-        ONSETS = ["sh", "ch", "ts"] + list("bcdfghjklmnprstvwzy")
-        VOWELS = "aiueo"
         res = []
         for word in s.split():
             w = re.sub(r'[^\w]', '', word).lower()
-            parses = []
-            def dfs(i, acc):
-                if len(parses) >= 8:
-                    return
-                if i == len(w):
-                    parses.append(list(acc))
-                    return
-                c = w[i]
-                matched = False
-                for on in ONSETS:
-                    if not w.startswith(on, i):
-                        continue
-                    j = i + len(on)
-                    if j >= len(w):
-                        break
-                    if w[j] == 'y' and j + 1 < len(w) and w[j+1] in VOWELS:
-                        matched = True
-                        acc.append(on + 'y' + w[j+1]); dfs(j + 2, acc); acc.pop()
-                    if w[j] in VOWELS:
-                        matched = True
-                        acc.append(on + w[j]); dfs(j + 1, acc); acc.pop()
-                if c in VOWELS:
-                    matched = True
-                    acc.append(c); dfs(i + 1, acc); acc.pop()
-                if c == 'n':
-                    acc.append('N'); dfs(i + 1, acc); acc.pop()
-                if not matched and c not in VOWELS and c != 'n':
-                    acc.append(c); dfs(i + 1, acc); acc.pop()
-            dfs(0, [])
-            res.extend(parses[0] if parses else [])
+            res.extend(romaji_parses(w, n_token='N')[0])
         return res
 
     all_syllables = []

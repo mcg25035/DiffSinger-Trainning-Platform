@@ -21,6 +21,8 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 
+from romaji_lattice import romaji_parses
+
 # ──────────────────────────── kana ↔ romaji ────────────────────────────
 
 # 基本假名(清音/濁音/半濁音/拗音),hepburn
@@ -144,20 +146,18 @@ def with_rendaku(reading: str):
     return None
 
 
-# ── 羅馬拼音音拍 lattice(Trie/FSM 分支窮舉,非單一貪婪解)─────────────
-# 轉移規則(依優先順序):
-#   1. onset + (y?)V   → か/きゃ/しゃ…(n+母音 = 結合,保守路徑,先試)
-#   2. 純母音          → あ/い/う/え/お
-#   3. n → ん          → 撥音(與 1 在「n+母音/y」處形成歧義,兩條都走)
-#   4. 子音無母音可接  → 促音 っ(tte → っ+て、kkou → っ+こ+う)
-_ROMAJI_ONSETS = ["sh", "ch", "ts"] + list("bcdfghjklmnprstvwzy")
-_ROMAJI_VOWELS = "aiueo"
-# 長音符號(歌詞網站慣用 - / ー 標長音)
-_ROMAJI_LONG_MARKS = "-ー−―–—"
+# ── 羅馬拼音音拍 lattice ─────────────────────────────────────────────
+# DFS 窮舉引擎與轉移規則(onset+(y?)V → 純母音 → ん → 促音/長音兩解)在
+# romaji_lattice.py;這裡只提供本服務的細項條件(音節→假名表)
 
 def _syllable_to_kana(syll: str):
     canon = ROMAJI_ALIASES.get(syll, syll)
     return ROMAJI_TO_KANA.get(canon)
+
+def _long_vowel_kana_for(prev_kana):
+    """前一個 kana mora → 其長音母音 kana(は→あ);查不到回 None。"""
+    r = morae_to_romaji([prev_kana])
+    return _LONG_VOWEL_KANA.get(r[0][-1:]) if r else None
 
 def enumerate_romaji_parses(text: str, max_parses: int = 16):
     """羅馬拼音 → 所有可能的假名 mora 序列(Trie 分支窮舉,保守解在前)。
@@ -168,57 +168,15 @@ def enumerate_romaji_parses(text: str, max_parses: int = 16):
         w = re.sub(r"[^\w\-ー−―–—]", "", word)
         if not w:
             continue
-        parses = []
-
-        def dfs(i, acc):
-            if len(parses) >= 8:
-                return
-            if i == len(w):
-                parses.append(list(acc))
-                return
-            c = w[i]
-            matched = False
-            # 長音符號(頁面慣用 - / ー 標長音):兩種解讀交給 DP 由漢字選邊 —
-            #   a) 長音:重複前一個 mora 的母音(ha-to → は+あ+と)
-            #   b) 分隔符:略過(ha-to → は+と)
-            if c in _ROMAJI_LONG_MARKS:
-                if acc:
-                    v = _LONG_VOWEL_KANA.get(morae_to_romaji([acc[-1]])[0][-1:])
-                    if v:
-                        acc.append(v); dfs(i + 1, acc); acc.pop()
-                dfs(i + 1, acc)
-                return
-            # 1. onset + (y?)V(含 n+母音 = 保守結合,先試)
-            for on in _ROMAJI_ONSETS:
-                if not w.startswith(on, i):
-                    continue
-                j = i + len(on)
-                if j >= len(w):
-                    break
-                if w[j] == "y" and j + 1 < len(w) and w[j + 1] in _ROMAJI_VOWELS:
-                    kana = _syllable_to_kana(on + "y" + w[j + 1])
-                    if kana:
-                        matched = True
-                        acc.append(kana); dfs(j + 2, acc); acc.pop()
-                if w[j] in _ROMAJI_VOWELS:
-                    kana = _syllable_to_kana(on + w[j])
-                    if kana:
-                        matched = True
-                        acc.append(kana); dfs(j + 1, acc); acc.pop()
-            # 2. 純母音
-            if c in _ROMAJI_VOWELS:
-                kana = _syllable_to_kana(c)
-                if kana:
-                    matched = True
-                    acc.append(kana); dfs(i + 1, acc); acc.pop()
-            # 3. 撥音ん(n+母音 時與 1 形成歧義,兩條都走)
-            if c == "n":
-                acc.append("ん"); dfs(i + 1, acc); acc.pop()
-            # 4. 促音:子音後面沒有母音/y 可接(tte、kkou)
-            if not matched and c not in _ROMAJI_VOWELS and c != "n":
-                acc.append("っ"); dfs(i + 1, acc); acc.pop()
-
-        dfs(0, [])
+        # 細項條件:音節 → 假名(查不到丟分支)、撥音 'ん'、促音 'っ'、長音符兩解
+        parses = romaji_parses(
+            w,
+            syllable_fn=_syllable_to_kana,
+            n_token="ん",
+            geminate_fn=lambda c: "っ",
+            long_marks=True,
+            prev_vowel_fn=_long_vowel_kana_for,
+        )
         word_parse_lists.append(parses or [[]])
 
     # 各詞的 parse 做笛卡兒組合(第一個 = 全保守解),cap max_parses

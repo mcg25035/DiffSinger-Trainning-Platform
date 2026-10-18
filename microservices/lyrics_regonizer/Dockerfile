@@ -54,6 +54,7 @@ RUN uv pip install --system --no-cache \
 RUN python3 -c "from funasr import AutoModel; AutoModel(model='FunAudioLLM/SenseVoiceSmall', hub='hf', trust_remote_code=True)"
 
 COPY app.py .
+COPY romaji_lattice.py .
 COPY transcribe_to_hiragana.py .
 
 EXPOSE 8000
